@@ -1,12 +1,13 @@
-"""
-Fast preprocessor: one LLM call replaces NarrativeAgent + CharacterAgent + WorldAgent.
+"""Fast preprocessor: one LLM call replaces NarrativeAgent + CharacterAgent + WorldAgent.
 Supports RAG injection for long novels via SemanticMemory.
 """
+import contextlib
 import json
 import re
+
+from ..config import CHUNK_SIZE, RAG_ENABLED, TOP_K_LONG, TOP_K_SHORT
 from .llm import llm_client
 from .prompts import PREPROCESS_SYSTEM, PREPROCESS_USER, PREPROCESS_USER_WITH_RAG
-from ..config import CHUNK_SIZE, TOP_K_SHORT, TOP_K_LONG, RAG_ENABLED
 
 
 def preprocess_novel(chapters: list[str], semantic_memory=None, mode: str = "short") -> dict:
@@ -23,13 +24,11 @@ def preprocess_novel(chapters: list[str], semantic_memory=None, mode: str = "sho
 
     rag_context = ""
     if RAG_ENABLED and semantic_memory and total_chars > 5000:
-        try:
+        with contextlib.suppress(Exception):
             rag_context = semantic_memory.retrieve_context(
                 queries=["main character motivation", "key plot events", "central conflict", "setting description"],
                 top_k=top_k,
             )
-        except Exception:
-            pass
 
     if rag_context:
         user_prompt = PREPROCESS_USER_WITH_RAG.format(chapters_text=chapters_text, rag_context=rag_context)

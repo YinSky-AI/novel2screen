@@ -2,10 +2,11 @@
 Section 8 of the platform specification.
 """
 from __future__ import annotations
+
 import os
 from datetime import datetime
-from sqlalchemy import (create_engine, Column, Integer, String, Text,
-                        Float, ForeignKey, JSON, DateTime, Index)
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./novel2screen.db")

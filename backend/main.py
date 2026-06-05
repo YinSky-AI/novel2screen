@@ -1,20 +1,38 @@
-﻿"""
-Novel2Screen - FastAPI Backend Server
-Multi-Agent System for Novel-to-Screenplay Conversion
+﻿"""Novel2Screen - FastAPI Backend Server
+Multi-Agent System for Novel-to-Screenplay Conversion.
 """
 import os
-import json
 import traceback
-from fastapi import Body, FastAPI, UploadFile, File, Form, HTTPException
+from typing import Annotated
+
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .workflows.novel2screen import Novel2ScreenWorkflow, route_mode
-from .schemas.validator import validate_screenplay_yaml, screenplay_to_yaml, yaml_to_screenplay
-from .config import HOST, PORT
+from .config import ALLOWED_ORIGINS
+from .schemas.validator import validate_screenplay_yaml
+from .workflows.novel2screen import Novel2ScreenWorkflow
 
-from fastapi.staticfiles import StaticFiles
+# Rate limiting
+_rate_limit_store: dict = {}
+RATE_LIMIT_MAX = 30  # requests per window
+RATE_LIMIT_WINDOW = 60  # seconds
+
+
+def _check_rate_limit(client_ip: str) -> bool:
+    """Check if client has exceeded rate limit. Returns True if allowed."""
+    import time
+    now = time.time()
+    window_start = now - RATE_LIMIT_WINDOW
+    timestamps = _rate_limit_store.get(client_ip, [])
+    timestamps = [t for t in timestamps if t > window_start]
+    if len(timestamps) >= RATE_LIMIT_MAX:
+        return False
+    timestamps.append(now)
+    _rate_limit_store[client_ip] = timestamps
+    return True
 
 app = FastAPI(
     title="Novel2Screen API",
@@ -26,9 +44,22 @@ FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fronten
 if os.path.isdir(FRONTEND_DIR):
     app.mount("/static", StaticFiles(directory=os.path.join(FRONTEND_DIR, "src")), name="static")
 
+
+@app.middleware("http")
+async def rate_limit_middleware(request, call_next):
+    """Apply rate limiting to API endpoints."""
+    if request.url.path not in ("/health", "/", "/static"):
+        client_ip = request.client.host if request.client else "unknown"
+        if not _check_rate_limit(client_ip):
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded. Try again later."},
+            )
+    return await call_next(request)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -139,11 +170,11 @@ async def convert_novel(req: ConvertRequest):
 
 @app.post("/convert/file")
 async def convert_novel_file(
-    file: UploadFile = File(...),
-    title: str = Form("Untitled"),
-    genre: str = Form("Drama"),
-    mode: str = Form(""),
-    pipeline: str = Form("fast"),
+    file: Annotated[UploadFile, File()],
+    title: Annotated[str, Form()] = "Untitled",
+    genre: Annotated[str, Form()] = "Drama",
+    mode: Annotated[str, Form()] = "",
+    pipeline: Annotated[str, Form()] = "fast",
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
@@ -157,10 +188,7 @@ async def convert_novel_file(
     if not title or title == "Untitled":
         title = os.path.splitext(file.filename)[0]
 
-    if pipeline == "full":
-        fn = workflow.run
-    else:
-        fn = workflow.fast_run
+    fn = workflow.run if pipeline == "full" else workflow.fast_run
 
     state = fn(novel_text=novel_text, novel_title=title, genre=genre, mode=mode)
 
@@ -187,7 +215,7 @@ async def convert_novel_file(
 
 
 @app.post("/validate")
-async def validate_yaml(yaml_text: str = Form(...)):
+async def validate_yaml(yaml_text: Annotated[str, Form()]):
     is_valid, errors = validate_screenplay_yaml(yaml_text)
     return {"valid": is_valid, "errors": errors}
 
@@ -225,7 +253,7 @@ def _generate_task_id() -> str:
 
 
 @app.post("/novels/upload")
-async def upload_novel(file: UploadFile = File(...)):
+async def upload_novel(file: Annotated[UploadFile, File()]):
     content = await file.read()
     try:
         text = content.decode("utf-8")
@@ -250,17 +278,14 @@ class GenerateRequest(BaseModel):
 
 
 @app.post("/generate/{task_id}")
-async def generate_screenplay(task_id: str, req: GenerateRequest = Body(...)):
+async def generate_screenplay(task_id: str, req: Annotated[GenerateRequest, Body()]):
     if task_id not in _task_store:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
     task = _task_store[task_id]
     task["status"] = "generating"
 
-    if req.pipeline == "full":
-        fn = workflow.run
-    else:
-        fn = workflow.fast_run
+    fn = workflow.run if req.pipeline == "full" else workflow.fast_run
 
     try:
         state = fn(
@@ -341,6 +366,7 @@ async def import_edits(task_id: str, req: ImportEditsRequest):
         raise HTTPException(status_code=400, detail="No original screenplay to compare")
 
     import hashlib
+
     from .core.llm import llm_client
     from .core.prompts import REPAIR_SYSTEM, REPAIR_USER
 
@@ -366,7 +392,7 @@ async def import_edits(task_id: str, req: ImportEditsRequest):
 
     original_hash = hashlib.sha256(original_yaml.encode()).hexdigest()
     try:
-        from .core.database import SessionLocal, HumanEdit
+        from .core.database import HumanEdit, SessionLocal
         db = SessionLocal()
         edit_record = HumanEdit(
             task_id=task_id,
@@ -421,7 +447,7 @@ async def get_alignment(task_id: str):
 
 @app.get("/health")
 async def health():
-    from .config import RAG_ENABLED, CHROMA_PERSIST_DIR
+    from .config import CHROMA_PERSIST_DIR, RAG_ENABLED
     return {
         "status": "ok",
         "version": "2.1.0",

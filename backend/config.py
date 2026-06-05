@@ -12,6 +12,13 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+# DeepSeek extended config
+DEEPSEEK_MAX_TOKENS = int(os.getenv("DEEPSEEK_MAX_TOKENS", "16384"))
+DEEPSEEK_CONTEXT_WINDOW = 128000
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
+MAX_INPUT_CHARS = int(os.getenv("MAX_INPUT_CHARS", "120000"))
+
+
 
 
 # Database
@@ -25,6 +32,12 @@ CHUNK_OVERLAP = 200
 TOP_K_LONG = 5
 TOP_K_SHORT = 3
 RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
+
+# CORS
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000,http://localhost:8000,http://127.0.0.1:3000,http://127.0.0.1:8000",
+).split(",")
 
 # Task limits
 MAX_RETRIES = 2

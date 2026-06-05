@@ -1,15 +1,15 @@
 """PromptLoader: reads prompt templates from YAML files in prompts/ directory."""
 import os
+
 import yaml
-from typing import Optional
 
 
 class PromptLoader:
     """Loads prompt templates from YAML files."""
 
-    def __init__(self, prompts_dir: Optional[str] = None):
+    def __init__(self, prompts_dir: str | None = None):
         self.prompts_dir = prompts_dir or os.path.join(
-            os.path.dirname(__file__), "..", "prompts"
+            os.path.dirname(__file__), "..", "prompts",
         )
         self._cache: dict[str, dict] = {}
 
@@ -20,9 +20,10 @@ class PromptLoader:
 
         fpath = os.path.join(self.prompts_dir, f"{agent_name}.yaml")
         if not os.path.exists(fpath):
-            raise FileNotFoundError(f"Prompt file not found: {fpath}")
+            msg = f"Prompt file not found: {fpath}"
+            raise FileNotFoundError(msg)
 
-        with open(fpath, "r", encoding="utf-8") as f:
+        with open(fpath, encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
         self._cache[agent_name] = data

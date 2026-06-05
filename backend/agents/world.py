@@ -1,11 +1,10 @@
-"""
-WorldAgent - Extracts world-building elements. Used in long mode only.
-"""
+"""WorldAgent - Extracts world-building elements. Used in long mode only."""
 import json
-from .base import AgentBase
+
 from ..core.llm import llm_client
 from ..core.prompts import WORLD_SYSTEM, WORLD_USER
 from ..schemas.models import WorldOutput
+from .base import AgentBase
 
 
 class WorldAgent(AgentBase):
@@ -32,13 +31,13 @@ class WorldAgent(AgentBase):
     def _parse_response(self, text: str) -> dict:
         import re
         text = text.strip()
-        text = re.sub(r'`(?:json)?\s*', '', text)
-        text = re.sub(r'\s*`', '', text)
+        text = re.sub(r"`(?:json)?\s*", "", text)
+        text = re.sub(r"\s*`", "", text)
         text = text.strip()
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            match = re.search(r'\{.*\}', text, re.DOTALL)
+            match = re.search(r"\{.*\}", text, re.DOTALL)
             if match:
                 return json.loads(match.group())
             raise
@@ -54,5 +53,5 @@ class WorldAgent(AgentBase):
         """Return default world context for short mode."""
         return {
             "world_rules": [{"domain": "general", "description": "Real-world setting with no supernatural elements"}],
-            "geography": []
+            "geography": [],
         }

@@ -1,18 +1,22 @@
-﻿"""
-Unit tests for Novel2Screen Pydantic schemas and YAML validation.
-"""
-import pytest
-import sys
+﻿"""Unit tests for Novel2Screen Pydantic schemas and YAML validation."""
 import os
+import sys
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from backend.schemas.models import (
-    Screenplay, Character, Episode, Scene, Beat, CharacterRole, BeatType,
-    NarrativeOutput, CharacterOutput, WorldOutput, TimelineOutput,
-    EpisodePlan, CriticOutput, ConsistencyOutput, Violation,
+    Beat,
+    Character,
+    ConsistencyOutput,
+    Episode,
+    NarrativeOutput,
+    Scene,
+    Screenplay,
+    Violation,
 )
-from backend.schemas.validator import validate_screenplay_yaml, screenplay_to_yaml, yaml_to_screenplay
+from backend.schemas.validator import screenplay_to_yaml, validate_screenplay_yaml, yaml_to_screenplay
 
 
 class TestPydanticModels:
@@ -111,11 +115,11 @@ class TestYAMLValidation:
         assert valid is True, f"Errors: {errors}"
 
     def test_invalid_yaml_string(self):
-        valid, errors = validate_screenplay_yaml("::: not valid yaml :::")
+        valid, _errors = validate_screenplay_yaml("::: not valid yaml :::")
         assert valid is False
 
     def test_empty_dict_yaml(self):
-        valid, errors = validate_screenplay_yaml("title: Test")
+        valid, _errors = validate_screenplay_yaml("title: Test")
         assert valid is False
 
     def test_round_trip_yaml(self):

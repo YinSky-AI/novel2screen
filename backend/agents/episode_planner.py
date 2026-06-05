@@ -1,11 +1,10 @@
-"""
-EpisodePlannerAgent - Plans episode structure from narrative analysis.
-"""
+"""EpisodePlannerAgent - Plans episode structure from narrative analysis."""
 import json
-from .base import AgentBase
+
 from ..core.llm import llm_client
 from ..core.prompts import EPISODE_PLANNER_SYSTEM, EPISODE_PLANNER_USER
 from ..schemas.models import EpisodePlan
+from .base import AgentBase
 
 
 class EpisodePlannerAgent(AgentBase):
@@ -31,13 +30,13 @@ class EpisodePlannerAgent(AgentBase):
     def _parse_response(self, text: str) -> dict:
         import re
         text = text.strip()
-        text = re.sub(r'`(?:json)?\s*', '', text)
-        text = re.sub(r'\s*`', '', text)
+        text = re.sub(r"`(?:json)?\s*", "", text)
+        text = re.sub(r"\s*`", "", text)
         text = text.strip()
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            match = re.search(r'\{.*\}', text, re.DOTALL)
+            match = re.search(r"\{.*\}", text, re.DOTALL)
             if match:
                 return json.loads(match.group())
             raise

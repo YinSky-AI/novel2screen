@@ -2,7 +2,6 @@
 Character bigram + Jaccard similarity for semantic search.
 """
 import re
-from typing import Optional
 
 
 class RagMemory:
@@ -52,7 +51,7 @@ class RagMemory:
     def _bigrams(self, text: str) -> set:
         """Extract character bigram set from text (Chinese chars only)."""
         chars = re.findall(r"[\u4e00-\u9fff]", text)
-        return set(chars[i] + chars[i+1] for i in range(len(chars)-1))
+        return {chars[i] + chars[i+1] for i in range(len(chars)-1)}
 
     def _chunk_text(self, text: str, chunk_size: int = 300) -> list[str]:
         """Split text into overlapping chunks by paragraphs."""
@@ -67,10 +66,10 @@ class RagMemory:
                 current = p
         if current.strip():
             chunks.append(current.strip())
-        return chunks if chunks else [text[:chunk_size]]
+        return chunks or [text[:chunk_size]]
 
 
-def extract_fact_sheet_full(novel_text: str, chunks: Optional[list] = None) -> dict:
+def extract_fact_sheet_full(novel_text: str, chunks: list | None = None) -> dict:
     """Extract fact sheet using RAG. Returns formatted reference + memory."""
     mem = RagMemory()
     mem.index(novel_text)

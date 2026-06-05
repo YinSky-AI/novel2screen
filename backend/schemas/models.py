@@ -1,30 +1,29 @@
-"""
-Pydantic models for Novel2Screen data schemas.
+"""Pydantic models for Novel2Screen data schemas.
 Matches the YAML schema spec from the design document.
 """
 from __future__ import annotations
-from pydantic import BaseModel, Field
-from typing import Optional
-from enum import Enum
 
+from enum import StrEnum
+
+from pydantic import BaseModel, Field
 
 # ── Beat Types ──
 
-class BeatType(str, Enum):
+class BeatType(StrEnum):
     dialogue = "dialogue"
     action = "action"
     silence = "silence"
     reaction = "reaction"
 
 
-class Transition(str, Enum):
+class Transition(StrEnum):
     cut = "cut"
     fade = "fade"
     dissolve = "dissolve"
     wipe = "wipe"
 
 
-class Emotion(str, Enum):
+class Emotion(StrEnum):
     anger = "anger"
     fear = "fear"
     joy = "joy"
@@ -40,7 +39,7 @@ class Emotion(str, Enum):
 
 # ── Character ──
 
-class CharacterRole(str, Enum):
+class CharacterRole(StrEnum):
     protagonist = "protagonist"
     antagonist = "antagonist"
     supporting = "supporting"
@@ -61,9 +60,9 @@ class Character(BaseModel):
 
 class Beat(BaseModel):
     type: BeatType
-    character_id: Optional[str] = None
+    character_id: str | None = None
     content: str
-    emotion: Optional[str] = None
+    emotion: str | None = None
 
 
 # ── Scene ──
@@ -72,9 +71,9 @@ class Scene(BaseModel):
     scene_id: str = Field(pattern=r"^sc_\d+$")
     location: str
     time: str
-    visual_focus: Optional[str] = None
-    sound_effect: Optional[str] = None
-    voice_over: Optional[str] = None
+    visual_focus: str | None = None
+    sound_effect: str | None = None
+    voice_over: str | None = None
     beats: list[Beat] = Field(default_factory=list, min_length=1)
     transition: str = "cut"
     duration_estimate: str = "120s"
@@ -175,7 +174,7 @@ class TimelineEdge(BaseModel):
 
 class TimelineOutput(BaseModel):
     events: list[TimelineEvent] = Field(default_factory=list)
-    graph: Optional[dict] = None  # nodes + edges for long mode
+    graph: dict | None = None  # nodes + edges for long mode
     conflicts: list[str] = Field(default_factory=list)
 
 

@@ -1,17 +1,14 @@
-"""
-Integration tests for Novel2Screen pipelines.
+"""Integration tests for Novel2Screen pipelines.
 Tests fast_run and run with real (but small) novel texts using demo mode.
 """
-import pytest
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from backend.workflows.novel2screen import parse_and_segment, route_mode, Novel2ScreenWorkflow
-from backend.core.memory import SemanticMemory, ShortTermMemory, CharacterBible, WorldBible, MemoryManager
+from backend.core.memory import CharacterBible, MemoryManager, SemanticMemory, ShortTermMemory, WorldBible
 from backend.core.preprocessor import preprocess_novel
-from backend.schemas.validator import validate_screenplay_yaml
+from backend.workflows.novel2screen import Novel2ScreenWorkflow, parse_and_segment, route_mode
 
 THREE_CHAPTER_NOVEL = """
 第一章 初入江湖

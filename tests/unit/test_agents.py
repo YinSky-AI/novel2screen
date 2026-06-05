@@ -1,23 +1,19 @@
-﻿"""
-Unit tests for Novel2Screen agents.
-"""
-import json
-import pytest
-import sys
+﻿"""Unit tests for Novel2Screen agents."""
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from backend.agents.narrative import NarrativeAgent
 from backend.agents.character import CharacterAgent
-from backend.agents.world import WorldAgent
-from backend.agents.timeline import TimelineAgent
-from backend.agents.episode_planner import EpisodePlannerAgent
-from backend.agents.scene_planner import ScenePlannerAgent
-from backend.agents.dialogue import DialogueAgent
-from backend.agents.critic import CriticAgent
-from backend.agents.repair import RepairAgent
 from backend.agents.consistency import BidirectionalConsistencyAgent
+from backend.agents.critic import CriticAgent
+from backend.agents.dialogue import DialogueAgent
+from backend.agents.episode_planner import EpisodePlannerAgent
+from backend.agents.narrative import NarrativeAgent
+from backend.agents.repair import RepairAgent
+from backend.agents.scene_planner import ScenePlannerAgent
+from backend.agents.timeline import TimelineAgent
+from backend.agents.world import WorldAgent
 
 
 class TestNarrativeAgent:
@@ -53,8 +49,8 @@ class TestCharacterAgent:
                     "id": "char_001", "name": "John", "role": "protagonist",
                     "goal": "Save world", "fear": "Loss", "arc": "Growth",
                     "voice_style": "Direct",
-                }
-            ]
+                },
+            ],
         }
         assert self.agent.validate(output) is True
 
@@ -89,7 +85,7 @@ class TestTimelineAgent:
             "events": [
                 {"chapter": 1, "description": "Opening"},
                 {"chapter": 2, "description": "Conflict"},
-            ]
+            ],
         }
         assert self.agent.validate(output) is True
 
@@ -105,8 +101,8 @@ class TestEpisodePlannerAgent:
     def test_validate_valid_output(self):
         output = {
             "episodes": [
-                {"id": "ep_001", "title": "Pilot", "summary": "Beginning"}
-            ]
+                {"id": "ep_001", "title": "Pilot", "summary": "Beginning"},
+            ],
         }
         assert self.agent.validate(output) is True
 
@@ -125,8 +121,8 @@ class TestScenePlannerAgent:
                 {
                     "scene_id": "sc_001", "location": "Park", "time": "Morning",
                     "objective": "Meet", "conflict": "Disagreement", "emotion": "tension",
-                }
-            ]
+                },
+            ],
         }
         assert self.agent.validate(output) is True
 
@@ -169,7 +165,7 @@ class TestCriticAgent:
     def test_validate_valid_output(self):
         output = {
             "violations": [
-                {"category": "pacing", "severity": "warning", "description": "Too fast", "location": "sc_001"}
+                {"category": "pacing", "severity": "warning", "description": "Too fast", "location": "sc_001"},
             ],
             "score": 0.85,
         }

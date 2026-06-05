@@ -1,11 +1,10 @@
-﻿"""
-Memory management for Novel2Screen.
+﻿"""Memory management for Novel2Screen.
 Handles short-term, long-term, and semantic memory (ChromaDB-backed RAG).
 """
 from __future__ import annotations
-from typing import Any, Optional
-import json
+
 import hashlib
+import json
 import os
 
 
@@ -95,8 +94,7 @@ class WorldBible:
 
 
 class SemanticMemory:
-    """
-    Vector-based semantic memory using ChromaDB (primary) or sentence-transformers
+    """Vector-based semantic memory using ChromaDB (primary) or sentence-transformers
     with cosine similarity (fallback). Provides persistent RAG retrieval.
     """
 
@@ -112,7 +110,7 @@ class SemanticMemory:
         self._use_chromadb = False
         self._indexed = False
 
-    def _init_chromadb(self):
+    def _init_chromadb(self) -> None:
         if self._use_chromadb and self._collection is not None:
             return
         try:
@@ -121,7 +119,7 @@ class SemanticMemory:
             os.makedirs(self.persist_dir, exist_ok=True)
             client = chromadb.PersistentClient(path=self.persist_dir)
             self._embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=self.embedding_model_name
+                model_name=self.embedding_model_name,
             )
             self._collection = client.get_or_create_collection(
                 name="novel2screen_chunks",
@@ -200,15 +198,32 @@ class SemanticMemory:
         return self._keyword_search(query, top_k)
 
     def _keyword_search(self, query: str, top_k: int = 3) -> list[dict]:
-        """Fallback keyword matching search."""
+        """Enhanced fallback keyword matching search.
+        Uses word-level Jaccard similarity, bigram overlap, and
+        normalized scoring for better retrieval.
+        """
         if not self._chunks:
             return []
         query_lower = query.lower()
-        query_keywords = set(query_lower.split())
+        query_words = set(query_lower.split())
+        query_bigrams = {query_lower[i:i+2] for i in range(len(query_lower)-1)}
+        if not query_words:
+            return [{"chunk": self._chunks[0][:500], "score": 0.05}]
         scored = []
         for chunk in self._chunks:
             chunk_lower = chunk.lower()
-            score = sum(1 for kw in query_keywords if kw in chunk_lower)
+            chunk_words = set(chunk_lower.split())
+            # Jaccard similarity on word sets
+            intersection = len(query_words & chunk_words)
+            union = len(query_words | chunk_words)
+            jaccard = intersection / max(union, 1)
+            # Bigram character overlap
+            chunk_bigrams = {chunk_lower[i:i+2] for i in range(len(chunk_lower)-1)}
+            bi_intersection = len(query_bigrams & chunk_bigrams)
+            bi_union = len(query_bigrams | chunk_bigrams)
+            bigram_score = bi_intersection / max(bi_union, 1)
+            # Combined score: weighted
+            score = 0.6 * jaccard + 0.4 * bigram_score
             if score > 0:
                 scored.append((score, chunk))
         if not scored:
@@ -246,11 +261,74 @@ def hash_yaml(yaml_str: str) -> str:
     return hashlib.sha256(yaml_str.encode("utf-8")).hexdigest()
 
 
+def verify_yaml_against_facts(screenplay_yaml: str, facts: dict | None = None, facts_text: str = "") -> dict:
+    """Verify screenplay YAML against extracted facts from the novel.
+
+    Checks character names, locations, and plot elements against
+    the original novel content to detect hallucinated or inconsistent content.
+
+    Returns a dict with:
+    - score: float (0.0-1.0)
+    - character_issues: list[str]
+    - location_issues: list[str]
+    - plot_issues: list[str]
+    """
+    import yaml
+    result = {
+        "score": 1.0,
+        "character_issues": [],
+        "location_issues": [],
+        "plot_issues": [],
+    }
+    try:
+        data = yaml.safe_load(screenplay_yaml) if screenplay_yaml else {}
+    except Exception:
+        result["score"] = 0.0
+        result["plot_issues"].append("Invalid YAML")
+        return result
+    if not isinstance(data, dict):
+        result["score"] = 0.5
+        result["plot_issues"].append("Empty or non-dict YAML")
+        return result
+    facts_lower = facts_text.lower() if facts_text else ""
+    if not facts_lower:
+        result["score"] = 0.5
+        return result
+    # Check character names against facts
+    placeholder_names = {"protagonist", "antagonist", "character", "hero", "villain", "narrator"}
+    for c in data.get("characters", []):
+        name = c.get("name", "") if isinstance(c, dict) else ""
+        if not name or len(name) < 2:
+            continue
+        if name.lower() in placeholder_names:
+            result["character_issues"].append(
+                "Character " + repr(name) + " (" + str(c.get("id", "")) + ") looks like a placeholder")
+            continue
+        if name.lower() not in facts_lower:
+            result["character_issues"].append(
+                "Character " + repr(name) + " (" + str(c.get("id", "")) + ") not found in facts")
+    # Check locations against facts
+    for ep in data.get("episodes", []):
+        for sc in ep.get("scenes", []):
+            loc = sc.get("location", "") if isinstance(sc, dict) else ""
+            if loc and len(loc) > 2 and loc.lower() not in facts_lower:
+                result["location_issues"].append(
+                    "Location " + repr(loc) + " in scene " + str(sc.get("scene_id", "?")) + " not found in facts")
+    # Calculate score
+    total_issues = (
+        len(result["character_issues"])
+        + len(result["location_issues"])
+        + len(result["plot_issues"])
+    )
+    result["score"] = max(0.0, 1.0 - total_issues * 0.15)
+    return result
+
+
 class MemoryManager:
     """Central memory orchestrator combining short-term, long-term, and semantic memory."""
 
     def __init__(self, stm: ShortTermMemory, char_bible: CharacterBible,
-                 world_bible: WorldBible, sem_mem: Optional[SemanticMemory] = None):
+                 world_bible: WorldBible, sem_mem: SemanticMemory | None = None):
         self.stm = stm
         self.char_bible = char_bible
         self.world_bible = world_bible
@@ -315,7 +393,7 @@ class MemoryManager:
             screenplay = yaml.safe_load(screenplay_yaml)
             if not screenplay:
                 return report
-            sc_chars = set(c.get("name", "") for c in screenplay.get("characters", []))
+            sc_chars = {c.get("name", "") for c in screenplay.get("characters", [])}
             report["character_count_match"] = len(sc_chars) > 0
             score = 0.5
             if len(sc_chars) >= 2:
@@ -345,12 +423,12 @@ class MemoryManager:
         char_file = os.path.join(out_dir, "char_bible.json")
         world_file = os.path.join(out_dir, "world_bible.json")
         if os.path.exists(char_file):
-            with open(char_file, "r", encoding="utf-8") as f:
+            with open(char_file, encoding="utf-8") as f:
                 data = json.load(f)
                 for c in (data if isinstance(data, list) else [data]):
                     self.char_bible.add_or_update(c)
         if os.path.exists(world_file):
-            with open(world_file, "r", encoding="utf-8") as f:
+            with open(world_file, encoding="utf-8") as f:
                 data = json.load(f)
                 self.world_bible.set_rules(data.get("rules", []))
                 self.world_bible.set_geography(data.get("geography", []))

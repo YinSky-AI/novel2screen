@@ -1,10 +1,9 @@
-"""
-YAML Schema validation for Novel2Screen.
+"""YAML Schema validation for Novel2Screen.
 Provides safe YAML serialization and deserialization for Screenplay models.
 """
-import json
 import yaml
 from pydantic import ValidationError
+
 from .models import Screenplay
 
 _DEMO_SCREENPLAY_YAML = """\
@@ -98,7 +97,7 @@ metadata:
 
 
 def screenplay_to_yaml(screenplay: Screenplay) -> str:
-    data = screenplay.model_dump(mode='json', exclude_none=True)
+    data = screenplay.model_dump(mode="json", exclude_none=True)
     return yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
 def yaml_to_screenplay(yaml_str: str) -> Screenplay:

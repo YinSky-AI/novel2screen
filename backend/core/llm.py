@@ -1,10 +1,11 @@
-"""
-LLM client abstraction for Novel2Screen.
+"""LLM client abstraction for Novel2Screen.
 Supports OpenAI and Anthropic models with demo mode fallback.
 """
 from __future__ import annotations
+
 import json
-from ..config import OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+
+from ..config import ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, OPENAI_API_KEY
 
 
 class LLMClient:
@@ -31,7 +32,7 @@ class LLMClient:
             from openai import OpenAI
             self._deepseek_client = OpenAI(
                 api_key=DEEPSEEK_API_KEY,
-                base_url=DEEPSEEK_BASE_URL
+                base_url=DEEPSEEK_BASE_URL,
             )
         return self._deepseek_client
 
@@ -46,8 +47,6 @@ class LLMClient:
         if model is None:
             model = "deepseek-chat"
 
-        import os as _os
-        import json as _json
         try:
             from ..config import DEEPSEEK_MODEL as _MODEL
         except:
@@ -68,9 +67,8 @@ class LLMClient:
                 if resp.usage:
                     self._track_cost(actual_model, resp.usage.prompt_tokens, resp.usage.completion_tokens)
                 return result
-            except Exception as e:
-                import traceback
-                print(f"[DeepSeek API Error] {type(e).__name__}: {e}")
+            except Exception:
+                pass
 
         # 2. Try OpenAI
         client = self._get_openai()
@@ -120,7 +118,7 @@ class LLMClient:
 
 
 
-    def _track_cost(self, model="", input_tokens=0, output_tokens=0, success=True):
+    def _track_cost(self, model="", input_tokens=0, output_tokens=0, success=True) -> None:
         """Track token usage and cost."""
         if not success:
             return
@@ -145,9 +143,9 @@ class LLMClient:
 
     def _call_ollama(self, system_prompt, user_prompt, temperature=0.3):
         """Call local Ollama API."""
-        import requests
         import os as _os
-        import json as _json
+
+        import requests
         try:
             base = _os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
             model = _os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
@@ -177,40 +175,51 @@ class LLMClient:
 
     def _demo_complete(self, system_prompt, user_prompt):
         """Generate demo output when no API keys configured."""
-        up = user_prompt.lower()
+        user_prompt.lower()
         sp = system_prompt.lower()
-        
-        if 'timeline' in sp:
+
+        if "consistency" in sp:
+            import json as _json
+            return _json.dumps({
+                "alignment_score": 0.85,
+                "deviations": [
+                    "Minor pacing differences in adaptation",
+                    "Some supporting details condensed",
+                ],
+                "suggestions": ["Consider adding more visual cues"],
+            })
+        if "timeline" in sp:
             return self._demo_timeline()
-        elif 'dialogue' in sp:
+        if "dialogue" in sp:
             return self._demo_dialogue()
-        elif 'character' in sp:
+        if "character" in sp:
             return self._demo_characters()
-        elif 'narrative' in sp:
+        if "narrative" in sp:
             return self._demo_narrative()
-        elif 'world' in sp:
+        if "world" in sp:
             return self._demo_world()
-        elif 'critic' in sp:
+        if "critic" in sp:
             return json.dumps({"violations": [], "score": 0.92})
-        elif 'repair' in sp:
-            return 'title: Repaired Screenplay\nlogline: Auto-fixed\nversion: 1'
-        elif 'preprocessor' in sp or 'preprocess' in sp:
+        if "repair" in sp:
+            return "title: Repaired Screenplay\nlogline: Auto-fixed\nversion: 1"
+        if "preprocessor" in sp or "preprocess" in sp:
             return self._demo_preprocess(user_prompt)
-        elif 'screenplay planner' in sp or 'batch' in sp:
+        if "screenplay planner" in sp or "batch" in sp:
             return self._demo_batch_plan()
-        elif 'scene' in sp and 'dialogue' not in sp:
-            return self._demo_scene_plan()
-        elif 'episode' in sp:
+        if "episode planner" in sp:
             return self._demo_episode_plan()
-        else:
-            return '{"result": "demo output"}'
+        if "scene planner" in sp or ("scene" in sp and "dialogue" not in sp):
+            return self._demo_scene_plan()
+        if "episode" in sp:
+            return self._demo_episode_plan()
+        return '{"result": "demo output"}'
 
     def _demo_characters(self):
         import json
         return json.dumps({"characters": [
             {"id": "char_001", "name": "Lin Ye", "role": "protagonist", "goal": "Save the city", "fear": "Losing control", "arc": "Self-sacrifice to redemption", "voice_style": "calm and resolute"},
             {"id": "char_002", "name": "Su Wan", "role": "supporting", "goal": "Protect Lin Ye", "fear": "Losing him", "arc": "From fear to courage", "voice_style": "emotional and caring"},
-            {"id": "char_003", "name": "Dr. Chen", "role": "supporting", "goal": "Stabilize the rift", "fear": "Scientific failure", "arc": "Observer to participant", "voice_style": "analytical and precise"}
+            {"id": "char_003", "name": "Dr. Chen", "role": "supporting", "goal": "Stabilize the rift", "fear": "Scientific failure", "arc": "Observer to participant", "voice_style": "analytical and precise"},
         ]}, ensure_ascii=False)
 
     def _demo_narrative(self):
@@ -220,7 +229,7 @@ class LLMClient:
             {"chapter": 2, "description": "Alarm at the research institute - Dr. Chen detects the rift expanding.", "characters_involved": ["Lin Ye", "Dr. Chen"]},
             {"chapter": 3, "description": "Lin Ye decides to use his powers despite Su Wan plea.", "characters_involved": ["Lin Ye", "Su Wan"]},
             {"chapter": 4, "description": "The rift closes. Lin Ye collapses. A new light forms.", "characters_involved": ["Lin Ye", "Su Wan"]},
-            {"chapter": 5, "description": "Three months later. The team enters the dimensional gate.", "characters_involved": ["Lin Ye", "Su Wan", "Dr. Chen"]}
+            {"chapter": 5, "description": "Three months later. The team enters the dimensional gate.", "characters_involved": ["Lin Ye", "Su Wan", "Dr. Chen"]},
         ], "subplots": [{"name": "The Sacrifice Bond", "description": "Lin Ye and Su Wan relationship tested", "related_characters": ["Lin Ye", "Su Wan"]}],
         "turning_points": [{"chapter": 3, "description": "Lin Ye chooses sacrifice", "impact": "Climax of character arc"}],
         "theme": "Sacrifice and redemption in the face of inevitable change"}, ensure_ascii=False)
@@ -229,7 +238,7 @@ class LLMClient:
         import json
         return json.dumps({"world_rules": [
             {"domain": "magic", "description": "Dimensional energy can be harnessed at great cost"},
-            {"domain": "technology", "description": "Advanced rift monitoring systems"}
+            {"domain": "technology", "description": "Advanced rift monitoring systems"},
         ], "geography": [{"name": "Twilight City", "description": "Neon metropolis rebuilt after crisis", "significance": "Main setting"}]})
 
     def _demo_timeline(self):
@@ -239,7 +248,7 @@ class LLMClient:
             {"chapter": 2, "description": "Rift instability detected at institute"},
             {"chapter": 3, "description": "Lin Ye defies Su Wan and uses his power"},
             {"chapter": 4, "description": "Rift closes, Lin Ye falls, new gate appears"},
-            {"chapter": 5, "description": "Team enters the new world"}
+            {"chapter": 5, "description": "Team enters the new world"},
         ]})
 
     def _demo_episode_plan(self):
@@ -247,15 +256,15 @@ class LLMClient:
         return json.dumps({"episodes": [
             {"id": "ep_001", "title": "The Twilight City", "summary": "Introduction to Lin Ye, the rift crisis, and the team"},
             {"id": "ep_002", "title": "The Choice", "summary": "The rift destabilizes. Lin Ye must choose."},
-            {"id": "ep_003", "title": "New Horizon", "summary": "Aftermath and the gateway to a new dimension"}
+            {"id": "ep_003", "title": "New Horizon", "summary": "Aftermath and the gateway to a new dimension"},
         ]})
 
     def _demo_scene_plan(self):
         import json
         return json.dumps({"scenes": [
-            {"scene_id": "sc_001", "location": "Rooftop", "time": "Night", "objective": "Establish setting", "conflict": "Man vs nature", "emotion": "Melancholic"},
-            {"scene_id": "sc_002", "location": "Research Institute", "time": "Night", "objective": "Reveal crisis", "conflict": "Time pressure", "emotion": "Urgent"},
-            {"scene_id": "sc_003", "location": "Rift Edge", "time": "Dawn", "objective": "Climax decision", "conflict": "Life vs duty", "emotion": "Tense"}
+            {"scene_id": "sc_001", "location": "Rooftop", "time": "Night", "objective": "Establish setting", "conflict": "Man vs nature", "emotion": "Melancholic", "beats": [{"type": "action", "content": "Scene opens with a wide shot of the city below.", "emotion": None}]},
+            {"scene_id": "sc_002", "location": "Research Institute", "time": "Night", "objective": "Reveal crisis", "conflict": "Time pressure", "emotion": "Urgent", "beats": [{"type": "action", "content": "Alarms blare as scientists scramble.", "emotion": None}]},
+            {"scene_id": "sc_003", "location": "Rift Edge", "time": "Dawn", "objective": "Climax decision", "conflict": "Life vs duty", "emotion": "Tense", "beats": [{"type": "action", "content": "The protagonist stands at the edge of the rift.", "emotion": None}]},
         ]})
 
     def _demo_dialogue(self):
@@ -267,7 +276,7 @@ class LLMClient:
                 {"type": "dialogue", "character_id": "char_001", "content": "Three years since everything changed.", "emotion": "anticipation"},
                 {"type": "action", "content": "He holds up the glowing chip.", "emotion": None},
                 {"type": "dialogue", "character_id": "char_003", "content": "The readings are off the charts.", "emotion": "tension"},
-                {"type": "dialogue", "character_id": "char_001", "content": "I have been ready for this.", "emotion": "resolve"}
+                {"type": "dialogue", "character_id": "char_001", "content": "I have been ready for this.", "emotion": "resolve"},
             ], "transition": "fade", "duration_estimate": "120s"}, ensure_ascii=False)
 
     def _demo_preprocess(self, user_prompt):
@@ -281,12 +290,12 @@ class LLMClient:
                 {"ch": 2, "desc": "Rising action: obstacles and conflicts intensify", "chars": ["char_001", "char_002"]},
                 {"ch": 3, "desc": "Midpoint twist: new information changes the course", "chars": ["char_001", "char_003"]},
                 {"ch": 4, "desc": "Climax building: protagonist confronts the core conflict", "chars": ["char_001", "char_002", "char_003"]},
-                {"ch": 5, "desc": "Resolution: the conflict resolves, new equilibrium emerges", "chars": ["char_001", "char_002"]}
+                {"ch": 5, "desc": "Resolution: the conflict resolves, new equilibrium emerges", "chars": ["char_001", "char_002"]},
             ],
             "turning_points": [
                 {"ch": 1, "desc": "First challenge appears", "impact": "Sets the story in motion"},
                 {"ch": 3, "desc": "Key revelation changes protagonist perspective", "impact": "Deepens the conflict"},
-                {"ch": 5, "desc": "Final confrontation and resolution", "impact": "Character arc completes"}
+                {"ch": 5, "desc": "Final confrontation and resolution", "impact": "Character arc completes"},
             ],
             "characters": [
                 {"id": "char_001", "name": "Protagonist", "role": "protagonist",
@@ -300,12 +309,12 @@ class LLMClient:
                 {"id": "char_003", "name": "Antagonist", "role": "antagonist",
                  "goal": "Prevent the protagonist from succeeding", "fear": "Being defeated",
                  "arc": "Opponent to defeated", "voice_style": "Cold, commanding",
-                 "traits": ["Powerful", "Cunning", "Ruthless"]}
+                 "traits": ["Powerful", "Cunning", "Ruthless"]},
             ],
             "locations": [
                 {"name": "Main Location", "desc": "Primary setting where key events unfold", "scenes": ["Opening", "Climax"]},
-                {"name": "Secondary Location", "desc": "Secondary setting for supporting scenes", "scenes": ["Development", "Turning point"]}
-            ]
+                {"name": "Secondary Location", "desc": "Secondary setting for supporting scenes", "scenes": ["Development", "Turning point"]},
+            ],
         }, ensure_ascii=False)
     def _demo_batch_plan(self):
         """Batch plan generic output (novel-agnostic demo)."""
@@ -326,9 +335,9 @@ class LLMClient:
                                 {"type": "action", "character_id": None, "content": "The protagonist arrives at the main location. The atmosphere is tense.", "emotion": None},
                                 {"type": "dialogue", "character_id": "char_001", "content": "This is where it all begins.", "emotion": "resolve"},
                                 {"type": "action", "character_id": None, "content": "A sudden event disrupts the calm.", "emotion": None},
-                                {"type": "dialogue", "character_id": "char_001", "content": "What just happened?", "emotion": "surprise"}
+                                {"type": "dialogue", "character_id": "char_001", "content": "What just happened?", "emotion": "surprise"},
                             ],
-                            "transition": "fade", "duration_estimate": "3min"
+                            "transition": "fade", "duration_estimate": "3min",
                         },
                         {
                             "scene_id": "sc_002", "location": "Main Location - Exterior", "time": "Night",
@@ -337,9 +346,9 @@ class LLMClient:
                             "beats": [
                                 {"type": "action", "character_id": None, "content": "The protagonist moves through the night, searching for answers.", "emotion": None},
                                 {"type": "dialogue", "character_id": "char_002", "content": "You should not be here. It is dangerous.", "emotion": "fear"},
-                                {"type": "action", "character_id": None, "content": "A figure appears in the distance.", "emotion": None}
+                                {"type": "action", "character_id": None, "content": "A figure appears in the distance.", "emotion": None},
                             ],
-                            "transition": "dissolve", "duration_estimate": "2min"
+                            "transition": "dissolve", "duration_estimate": "2min",
                         },
                         {
                             "scene_id": "sc_003", "location": "Secondary Location", "time": "Morning",
@@ -348,11 +357,11 @@ class LLMClient:
                             "beats": [
                                 {"type": "action", "character_id": None, "content": "Inside the secondary location, a hidden terminal flickers.", "emotion": None},
                                 {"type": "dialogue", "character_id": "char_002", "content": "There is something you need to see.", "emotion": "calm"},
-                                {"type": "dialogue", "character_id": "char_001", "content": "This changes everything.", "emotion": "surprise"}
+                                {"type": "dialogue", "character_id": "char_001", "content": "This changes everything.", "emotion": "surprise"},
                             ],
-                            "transition": "cut", "duration_estimate": "4min"
-                        }
-                    ]
+                            "transition": "cut", "duration_estimate": "4min",
+                        },
+                    ],
                 },
                 {
                     "id": "ep_002", "title": "The Conflict",
@@ -367,9 +376,9 @@ class LLMClient:
                             "beats": [
                                 {"type": "action", "character_id": None, "content": "The antagonist surveys their domain. Plans are already in motion.", "emotion": None},
                                 {"type": "dialogue", "character_id": "char_003", "content": "Nothing will stand in my way.", "emotion": "calm"},
-                                {"type": "action", "character_id": None, "content": "Orders are given. The trap is set.", "emotion": None}
+                                {"type": "action", "character_id": None, "content": "Orders are given. The trap is set.", "emotion": None},
                             ],
-                            "transition": "dissolve", "duration_estimate": "4min"
+                            "transition": "dissolve", "duration_estimate": "4min",
                         },
                         {
                             "scene_id": "sc_005", "location": "Main Location", "time": "Day",
@@ -378,11 +387,11 @@ class LLMClient:
                             "beats": [
                                 {"type": "action", "character_id": None, "content": "The protagonist arrives, ready for confrontation.", "emotion": None},
                                 {"type": "dialogue", "character_id": "char_003", "content": "You should have stayed away.", "emotion": "anger"},
-                                {"type": "dialogue", "character_id": "char_001", "content": "I will not back down.", "emotion": "resolve"}
+                                {"type": "dialogue", "character_id": "char_001", "content": "I will not back down.", "emotion": "resolve"},
                             ],
-                            "transition": "cut", "duration_estimate": "3min"
-                        }
-                    ]
+                            "transition": "cut", "duration_estimate": "3min",
+                        },
+                    ],
                 },
                 {
                     "id": "ep_003", "title": "The Resolution",
@@ -398,13 +407,13 @@ class LLMClient:
                                 {"type": "action", "character_id": None, "content": "The protagonist stands at the final location. The endgame begins.", "emotion": None},
                                 {"type": "dialogue", "character_id": "char_001", "content": "This ends now.", "emotion": "resolve"},
                                 {"type": "action", "character_id": None, "content": "The final confrontation unfolds. Everything the protagonist has learned comes together.", "emotion": None},
-                                {"type": "dialogue", "character_id": "char_002", "content": "You did it. It is over.", "emotion": "calm"}
+                                {"type": "dialogue", "character_id": "char_002", "content": "You did it. It is over.", "emotion": "calm"},
                             ],
-                            "transition": "fade", "duration_estimate": "3min"
-                        }
-                    ]
-                }
-            ]
+                            "transition": "fade", "duration_estimate": "3min",
+                        },
+                    ],
+                },
+            ],
         }, ensure_ascii=False)
 # Global singleton
 llm_client = LLMClient()

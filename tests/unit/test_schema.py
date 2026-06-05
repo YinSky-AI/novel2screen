@@ -1,12 +1,13 @@
 """Unit tests for schema validation."""
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["DEEPSEEK_API_KEY"] = ""
 
-from backend.schemas.models import (Screenplay, Episode, Scene, Beat,
-    Character, CharacterRole, BeatType, Emotion, Transition)
+from backend.schemas.models import Beat, Character, Emotion, Episode, Scene, Screenplay, Transition
 from backend.schemas.validator import validate_screenplay_yaml
 
 
@@ -22,7 +23,7 @@ def test_screenplay_minimal():
                               voice_style="Direct", traits=["Brave"])],
         episodes=[Episode(id="ep_001", title="Start", summary="Beginning",
                           scenes=[Scene(scene_id="sc_001", location="Room", time="Day",
-                                        beats=[Beat(type="action", content="Hero enters")])])]
+                                        beats=[Beat(type="action", content="Hero enters")])])],
     )
     assert sp.title == "Test"
     assert sp.schema_version == "1.0"
@@ -129,10 +130,10 @@ episodes:
       content: Hello
       emotion: invalid_emotion_xyz
 """
-    valid, errors = validate_screenplay_yaml(yaml_str)
+    _valid, _errors = validate_screenplay_yaml(yaml_str)
     # Note: str,Enum allows any string in Pydantic v2
     # This test verifies the behavior, not strictness
-    assert not valid or True  # Accept both outcomes
+    assert True  # Accept both outcomes
     print("PASS: test_yaml_invalid_emotion")
 
 

@@ -1,15 +1,13 @@
-﻿"""
-Agent base class for Novel2Screen.
+﻿"""Agent base class for Novel2Screen.
 Every agent implements run(), validate(), and retry().
 """
 from abc import ABC, abstractmethod
-from typing import Any, Callable
-import time
+from collections.abc import Callable
 
 
 class AgentError(Exception):
     """Base exception for agent failures."""
-    pass
+
 
 
 class AgentBase(ABC):
@@ -28,23 +26,18 @@ class AgentBase(ABC):
 
     @abstractmethod
     def run(self, input_data: dict) -> dict:
-        """
-        Execute the agent's core logic.
+        """Execute the agent's core logic.
         Must return a dict conforming to the agent's output schema.
         """
-        pass
 
     @abstractmethod
     def validate(self, output: dict) -> bool:
-        """
-        Validate the agent's output against its schema.
+        """Validate the agent's output against its schema.
         Returns True if valid, False otherwise.
         """
-        pass
 
-    def retry(self, input_data: dict, validation_fn: Callable[[dict], bool] = None) -> dict:
-        """
-        Run the agent with retry logic.
+    def retry(self, input_data: dict, validation_fn: Callable[[dict], bool] | None = None) -> dict:
+        """Run the agent with retry logic.
         Re-runs up to max_retries if validation fails.
         """
         last_error = None
@@ -64,7 +57,7 @@ class AgentBase(ABC):
 
         raise AgentError(
             f"Agent '{self.name}' failed after {self.max_retries + 1} attempts. "
-            f"Last error: {last_error}"
+            f"Last error: {last_error}",
         )
 
     def get_llm_response(self, system_prompt: str, user_prompt: str,

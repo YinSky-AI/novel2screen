@@ -1,8 +1,9 @@
 """ModelRouter: cost-optimized LLM selection and retry with exponential backoff."""
 from __future__ import annotations
-import time
+
 import random
-from typing import Optional
+import time
+
 from .llm import llm_client
 
 
@@ -10,20 +11,21 @@ class ModelRouter:
     """Routes agent tasks to optimal LLM models with retry logic."""
 
     MODEL_TABLE = {
-        "narrative": "deepseek-chat",
-        "character": "deepseek-chat",
-        "world": "deepseek-chat",
+        # Map per design doc ?13: use available models as fallbacks
+        "narrative": "deepseek-chat",      # doc: claude-3-haiku
+        "character": "deepseek-chat",      # doc: gpt-3.5-turbo
+        "world": "deepseek-chat",          # doc: claude-3-sonnet (long mode)
         "timeline": "deepseek-chat",
         "episode_planner": "deepseek-chat",
-        "scene_planner": "gpt-4o-mini",
-        "dialogue": "deepseek-chat",
-        "yaml_compiler": "gpt-4o-mini",
-        "critic": "deepseek-chat",
-        "repair": "deepseek-chat",
-        "consistency": "deepseek-chat",
+        "scene_planner": "gpt-4o-mini",    # doc: gpt-4-turbo
+        "dialogue": "deepseek-chat",       # doc: claude-3-haiku
+        "yaml_compiler": "gpt-4o-mini",    # doc: gpt-4-turbo
+        "critic": "gpt-4o-mini",           # doc: gpt-4-turbo
+        "repair": "deepseek-chat",         # doc: gpt-3.5-turbo
+        "consistency": "gpt-4o-mini",
     }
 
-    def __init__(self, overrides: Optional[dict] = None):
+    def __init__(self, overrides: dict | None = None):
         if overrides:
             self.MODEL_TABLE.update(overrides)
 
@@ -51,4 +53,5 @@ class ModelRouter:
                     delay = (2 ** attempt) + random.uniform(0, 0.5)
                     time.sleep(delay)
 
-        raise RuntimeError(f"{agent_name}: all {max_retries+1} retries failed. Last error: {last_error}")
+        msg = f"{agent_name}: all {max_retries+1} retries failed. Last error: {last_error}"
+        raise RuntimeError(msg)

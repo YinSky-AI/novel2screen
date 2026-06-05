@@ -1,30 +1,31 @@
-"""
-Novel2Screen Workflow Orchestrator.
+"""Novel2Screen Workflow Orchestrator.
 Supports two pipelines:
   - fast_run: 2-3 LLM calls with RAG (recommended for production)
-  - run: 9+ agent sequential chain (for maximum quality, long novels)
+  - run: 9+ agent sequential chain (for maximum quality, long novels).
 """
-from typing import TypedDict, Literal, Optional
+import contextlib
 import json
 import os
 import re
+from typing import Literal, TypedDict
+
 import yaml
 
-from ..agents.narrative import NarrativeAgent
-from ..agents.character import CharacterAgent
-from ..agents.world import WorldAgent
-from ..agents.timeline import TimelineAgent
-from ..agents.episode_planner import EpisodePlannerAgent
-from ..agents.scene_planner import ScenePlannerAgent
-from ..agents.dialogue import DialogueAgent
-from ..agents.critic import CriticAgent
-from ..agents.repair import RepairAgent
-from ..agents.consistency import BidirectionalConsistencyAgent
-from ..core.llm import llm_client
-from ..core.memory import ShortTermMemory, CharacterBible, WorldBible, SemanticMemory, MemoryManager, hash_yaml
-from ..core.preprocessor import preprocess_novel, batch_plan_episodes
-from ..core.prompts import FAST_CRITIC_SYSTEM, FAST_CRITIC_USER
-from ..config import CHROMA_PERSIST_DIR, EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP, RAG_ENABLED
+from backend.agents.character import CharacterAgent
+from backend.agents.consistency import BidirectionalConsistencyAgent
+from backend.agents.critic import CriticAgent
+from backend.agents.dialogue import DialogueAgent
+from backend.agents.episode_planner import EpisodePlannerAgent
+from backend.agents.narrative import NarrativeAgent
+from backend.agents.repair import RepairAgent
+from backend.agents.scene_planner import ScenePlannerAgent
+from backend.agents.timeline import TimelineAgent
+from backend.agents.world import WorldAgent
+from backend.config import CHROMA_PERSIST_DIR, CHUNK_OVERLAP, CHUNK_SIZE, EMBEDDING_MODEL, RAG_ENABLED
+from backend.core.llm import llm_client
+from backend.core.memory import CharacterBible, SemanticMemory, ShortTermMemory, WorldBible
+from backend.core.preprocessor import batch_plan_episodes, preprocess_novel
+from backend.core.prompts import FAST_CRITIC_SYSTEM, FAST_CRITIC_USER
 
 
 class WorkflowState(TypedDict):
@@ -108,8 +109,8 @@ class Novel2ScreenWorkflow:
         )
 
     def _build_screenplay(self, novel_title: str, genre: str, pre: dict, raw_episodes: list[dict]) -> tuple[dict, str]:
-        from ..schemas.models import Screenplay
-        from ..schemas.validator import screenplay_to_yaml
+        from backend.schemas.models import Screenplay
+        from backend.schemas.validator import screenplay_to_yaml
 
         std_emos = {"anger", "fear", "joy", "sadness", "surprise", "disgust", "anticipation", "calm", "tension", "confusion", "resolve"}
         emo_map = {"震惊": "surprise", "愤怒": "anger", "恐惧": "fear", "悲伤": "sadness", "喜悦": "joy",
@@ -120,7 +121,7 @@ class Novel2ScreenWorkflow:
             ep.setdefault("scenes", [])
             for sc in ep.get("scenes", []):
                 if not sc.get("characters_present"):
-                    cids = list(set(b.get("character_id") for b in sc.get("beats", []) if b.get("character_id")))
+                    cids = list({b.get("character_id") for b in sc.get("beats", []) if b.get("character_id")})
                     if cids:
                         sc["characters_present"] = cids
                 for b in sc.get("beats", []):
@@ -142,8 +143,8 @@ class Novel2ScreenWorkflow:
         )
         screenplay_dict = screenplay.model_dump(exclude_none=True)
         raw_yaml = screenplay_to_yaml(screenplay)
-        raw_yaml = re.sub(r'^`(?:yaml)?\s*', '', raw_yaml)
-        raw_yaml = re.sub(r'\s*`$', '', raw_yaml)
+        raw_yaml = re.sub(r"^`(?:yaml)?\s*", "", raw_yaml)
+        raw_yaml = re.sub(r"\s*`$", "", raw_yaml)
         return screenplay_dict, raw_yaml
 
     def fast_run(self, novel_text: str, novel_title: str = "Untitled",
@@ -166,10 +167,8 @@ class Novel2ScreenWorkflow:
 
             sem_mem = self._init_semantic_memory()
             if RAG_ENABLED:
-                try:
+                with contextlib.suppress(Exception):
                     sem_mem.index(novel_text, source_label="novel")
-                except Exception:
-                    pass
 
             pre = preprocess_novel(chunks, semantic_memory=sem_mem, mode=state["mode"])
             state["narrative"] = {"theme": pre["theme"], "major_events": pre["major_events"], "turning_points": pre["turning_points"]}
@@ -207,8 +206,8 @@ class Novel2ScreenWorkflow:
                     temperature=0.1,
                 )
                 critic_text = critic_resp.strip()
-                critic_text = re.sub(r'^`(?:json)?\s*', '', critic_text)
-                critic_text = re.sub(r'\s*`$', '', critic_text)
+                critic_text = re.sub(r"^`(?:json)?\s*", "", critic_text)
+                critic_text = re.sub(r"\s*`$", "", critic_text)
                 critic_data = json.loads(critic_text)
                 state["violations"] = critic_data.get("violations", [])
                 state["critic_score"] = critic_data.get("score", 1.0)
@@ -219,8 +218,8 @@ class Novel2ScreenWorkflow:
                 try:
                     ro = self.repair_agent.retry({"violations": state["violations"], "screenplay": state["screenplay_yaml"]})
                     ry = ro.get("yaml_output", "")
-                    ry = re.sub(r'^`(?:yaml)?\s*', '', ry)
-                    ry = re.sub(r'\s*`$', '', ry)
+                    ry = re.sub(r"^`(?:yaml)?\s*", "", ry)
+                    ry = re.sub(r"\s*`$", "", ry)
                     if ry:
                         state["screenplay_yaml"] = ry
                         state["repair_changes"].append("Quality repair applied")
@@ -258,10 +257,8 @@ class Novel2ScreenWorkflow:
 
             sem_mem = self._init_semantic_memory()
             if RAG_ENABLED:
-                try:
+                with contextlib.suppress(Exception):
                     sem_mem.index(novel_text, source_label="novel")
-                except Exception:
-                    pass
 
             self.stm.set_active_chapter("\n\n".join(chunks[:3]))
 
@@ -318,24 +315,31 @@ class Novel2ScreenWorkflow:
 
             dialogue_idx = 0
             episode_objects = []
-            for ep in episodes:
-                num_scenes = len(ep.get("scenes_in_episode", []) or [])
+            for ep_idx, ep in enumerate(episodes):
+                # Use scene_plans to determine scene count per episode
+                sp = state["scene_plans"][ep_idx] if ep_idx < len(state["scene_plans"]) else {}
+                num_scenes = len(sp.get("scenes", []))
                 if num_scenes > 0:
                     ep_scenes = state["dialogue_scenes"][dialogue_idx:dialogue_idx + num_scenes]
                     dialogue_idx += len(ep_scenes)
+                elif state["dialogue_scenes"]:
+                    # Fallback: distribute remaining scenes evenly
+                    remaining = len(state["dialogue_scenes"]) - dialogue_idx
+                    remaining_eps = len(episodes) - ep_idx
+                    scenes_per_ep = max(1, remaining // max(remaining_eps, 1))
+                    ep_scenes = state["dialogue_scenes"][dialogue_idx:dialogue_idx + scenes_per_ep]
+                    dialogue_idx += len(ep_scenes)
                 else:
-                    ep_scenes = state["dialogue_scenes"][dialogue_idx:dialogue_idx + 3]
-                    dialogue_idx += len(ep_scenes) if ep_scenes else 0
+                    ep_scenes = []
                 episode_objects.append({
                     "id": ep["id"], "title": ep["title"], "summary": ep["summary"],
-                    "scenes": ep_scenes if ep_scenes else state["dialogue_scenes"][:3],
+                    "scenes": ep_scenes,
                 })
 
-            if not any(e["scenes"] for e in episode_objects):
-                episode_objects[0]["scenes"] = state["dialogue_scenes"][:min(5, len(state["dialogue_scenes"]))]
 
-            from ..schemas.models import Screenplay
-            from ..schemas.validator import screenplay_to_yaml
+
+            from backend.schemas.models import Screenplay
+            from backend.schemas.validator import screenplay_to_yaml
 
             screenplay = Screenplay(
                 title=state["novel_title"],
@@ -347,8 +351,8 @@ class Novel2ScreenWorkflow:
             )
             state["screenplay"] = screenplay.model_dump(exclude_none=True)
             raw_yaml = screenplay_to_yaml(screenplay)
-            raw_yaml = re.sub(r'^`(?:yaml)?\s*', '', raw_yaml)
-            raw_yaml = re.sub(r'\s*`$', '', raw_yaml)
+            raw_yaml = re.sub(r"^`(?:yaml)?\s*", "", raw_yaml)
+            raw_yaml = re.sub(r"\s*`$", "", raw_yaml)
             state["screenplay_yaml"] = raw_yaml
 
             critic_out = self.critic_agent.retry({"screenplay": state["screenplay_yaml"]})
@@ -363,14 +367,12 @@ class Novel2ScreenWorkflow:
                 })
                 state["repair_changes"].append("Applied auto-repair for violations")
                 repaired_yaml = repair_out.get("yaml_output", "")
-                repaired_yaml = re.sub(r'^`(?:yaml)?\s*', '', repaired_yaml)
-                repaired_yaml = re.sub(r'\s*`$', '', repaired_yaml)
+                repaired_yaml = re.sub(r"^`(?:yaml)?\s*", "", repaired_yaml)
+                repaired_yaml = re.sub(r"\s*`$", "", repaired_yaml)
                 if repaired_yaml:
                     state["screenplay_yaml"] = repaired_yaml
-                    try:
+                    with contextlib.suppress(Exception):
                         state["screenplay"] = yaml.safe_load(repaired_yaml)
-                    except Exception:
-                        pass
 
             state["completed"] = True
 

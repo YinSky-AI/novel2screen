@@ -1,5 +1,4 @@
-﻿"""
-Prompt templates for all Novel2Screen agents.
+﻿"""Prompt templates for all Novel2Screen agents.
 Organized by agent role for maintainability.
 """
 
