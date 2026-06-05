@@ -1,0 +1,135 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Novel2Screen - 小说改编剧本系统</title>
+    <link rel="stylesheet" href="/static/styles/main.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <span class="brand-icon">🎬</span>
+            <span class="brand-text">Novel2Screen</span>
+        </div>
+        <div class="nav-links">
+            <a href="#convert" class="nav-link active">转换</a>
+            <a href="#preview" class="nav-link">预览</a>
+            <a href="#export" class="nav-link">导出</a>
+        </div>
+    </nav>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Input Section -->
+        <section id="convert" class="section active">
+            <div class="card">
+                <h2>📖 输入小说内容</h2>
+                <div class="form-group">
+                    <label for="title">作品标题</label>
+                    <input type="text" id="title" placeholder="输入小说标题" value="未命名作品">
+                </div>
+                <div class="form-group">
+                    <label for="genre">类型</label>
+                    <select id="genre">
+                        <option value="Drama">剧情 Drama</option>
+                        <option value="Action">动作 Action</option>
+                        <option value="Comedy">喜剧 Comedy</option>
+                        <option value="Fantasy">奇幻 Fantasy</option>
+                        <option value="Sci-Fi">科幻 Sci-Fi</option>
+                        <option value="Thriller">惊悚 Thriller</option>
+                        <option value="Romance">爱情 Romance</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="mode">处理模式</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="mode" value="auto" checked>
+                            <span>自动 (推荐)</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="mode" value="short">
+                            <span>Short (3-10章)</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="mode" value="long">
+                            <span>Long (10章+)</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="demoMode" checked>
+                        <span>⚡ Demo 模式 (快速预览，无需等待 AI)</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="novelText">小说文本 (至少3章)</label>
+                    <textarea id="novelText" rows="12" placeholder="粘贴您的小说文本，支持中文和英文内容&#10;&#10;至少包含3个章节的内容..."></textarea>
+                </div>
+                <div class="form-actions">
+                    <label class="file-upload-btn">
+                        📂 上传文件
+                        <input type="file" id="fileInput" accept=".txt,.md" hidden>
+                    </label>
+                    <button id="convertBtn" class="btn btn-primary" onclick="convertNovel()">
+                        🚀 开始转换
+                    </button>
+                </div>
+            </div>
+
+            <!-- Progress -->
+            <div id="progress" class="card progress-card hidden">
+                <h3>⏳ 处理进度</h3>
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill"></div>
+                </div>
+                <p id="progressText">初始化...</p>
+            </div>
+        </section>
+
+        <!-- Preview Section -->
+        <section id="preview" class="section">
+            <div class="card">
+                <div class="preview-header">
+                    <h2>📄 剧本预览</h2>
+                    <div class="preview-stats" id="previewStats"></div>
+                </div>
+                <div id="previewContent" class="preview-content">
+                    <div class="empty-state">
+                        <span class="empty-icon">🎭</span>
+                        <p>还没有剧本内容</p>
+                        <p>请先在"转换"页面提交小说</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Critic Report -->
+            <div id="criticReport" class="card hidden">
+                <h3>🔍 质量报告</h3>
+                <div id="criticContent"></div>
+            </div>
+        </section>
+
+        <!-- Export Section -->
+        <section id="export" class="section">
+            <div class="card">
+                <h2>💾 导出剧本</h2>
+                <div id="exportContent" class="export-content">
+                    <div class="empty-state">
+                        <span class="empty-icon">📦</span>
+                        <p>还没有可导出的剧本</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script src="/static/utils/api.js"></script>
+    <script src="/static/components/app.js"></script>
+</body>
+</html>
+
+

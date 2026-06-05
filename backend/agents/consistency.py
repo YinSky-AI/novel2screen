@@ -1,0 +1,50 @@
+"""
+BidirectionalConsistencyAgent - Compares novel to screenplay adaptation.
+"""
+import json
+from .base import AgentBase
+from ..core.llm import llm_client
+from ..core.prompts import CONSISTENCY_SYSTEM, CONSISTENCY_USER
+from ..schemas.models import ConsistencyOutput
+
+
+class BidirectionalConsistencyAgent(AgentBase):
+    """Compares novel to screenplay and provides alignment score."""
+
+    def __init__(self, model: str = "gpt-4o-mini"):
+        super().__init__(name="BidirectionalConsistencyAgent", model=model)
+
+    def run(self, input_data: dict) -> dict:
+        response = llm_client.complete(
+            system_prompt=CONSISTENCY_SYSTEM,
+            user_prompt=CONSISTENCY_USER.format(
+                novel_chunks=json.dumps(input_data.get("novel_chunks", []), ensure_ascii=False),
+                screenplay=input_data.get("screenplay", ""),
+                human_edits=input_data.get("human_edits", "None"),
+            ),
+            model=self.model,
+            temperature=0.2,
+        )
+        return self._parse_response(response)
+
+
+    def _parse_response(self, text: str) -> dict:
+        import re
+        text = text.strip()
+        text = re.sub(r'`(?:json)?\s*', '', text)
+        text = re.sub(r'\s*`', '', text)
+        text = text.strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r'\{.*\}', text, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+            raise
+
+    def validate(self, output: dict) -> bool:
+        try:
+            ConsistencyOutput(**output)
+            return True
+        except Exception:
+            return False

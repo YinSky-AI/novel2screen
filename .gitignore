@@ -1,0 +1,21 @@
+﻿# Python
+__pycache__/
+*.pyc
+venv/
+.env
+*.egg-info/
+
+# Data
+data/exports/*.yaml
+
+# IDE
+.vscode/
+.idea/
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# OS
+Thumbs.db
+.DS_Store
