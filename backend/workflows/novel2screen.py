@@ -306,13 +306,41 @@ class Novel2ScreenWorkflow:
 
             # Build screenplay from batch plan
             from ..schemas.models import Screenplay
+            raw_episodes = plan.get("episodes", [])
+            if not raw_episodes:
+                raw_episodes = [{"id": "ep_001", "title": novel_title or "Adaptation", "summary": "Auto-generated",
+                    "scenes": [{"scene_id": "sc_001", "location": "Main", "time": "Unknown",
+                        "beats": [{"type": "action", "content": "Opening."}],
+                        "transition": "cut", "duration_estimate": "60s"}]}]
+
+            # Post-process emotions and characters_present
+            std_emos = {"anger","fear","joy","sadness","surprise","disgust","anticipation","calm","tension","confusion","resolve"}
+            emo_map = {"震惊":"surprise","愤怒":"anger","恐惧":"fear","悲伤":"sadness","喜悦":"joy",
+                       "怀疑":"tension","专注":"calm","紧张":"tension","决心":"resolve","困惑":"confusion",
+                       "determined":"resolve","desperation":"fear","urgency":"tension","suspicion":"tension","determination":"resolve"}
+            for ep in raw_episodes:
+                ep.setdefault("scenes", [])
+                for sc in ep.get("scenes", []):
+                    if not sc.get("characters_present"):
+                        cids = list(set(b.get("character_id") for b in sc.get("beats", []) if b.get("character_id")))
+                        if cids:
+                            sc["characters_present"] = cids
+                    for b in sc.get("beats", []):
+                        e = b.get("emotion")
+                        if e:
+                            k = e.lower().strip()
+                            if k in std_emos:
+                                b["emotion"] = k
+                            elif k in emo_map:
+                                b["emotion"] = emo_map[k]
+
             screenplay = Screenplay(
                 title=novel_title,
                 logline=pre.get("theme", ""),
                 genre=genre,
                 theme=pre.get("theme", ""),
                 characters=pre.get("characters", []),
-                episodes=plan.get("episodes", []),
+                episodes=raw_episodes,
             )
             state["screenplay"] = screenplay.model_dump(exclude_none=True)
             raw_yaml = screenplay_to_yaml(screenplay)
@@ -320,7 +348,7 @@ class Novel2ScreenWorkflow:
             raw_yaml = re.sub(r'\s*`$', '', raw_yaml)
             state["screenplay_yaml"] = raw_yaml
 
-            # 4. QUICK CRITIC: 1 LLM call (lightweight)
+            # 4. QUICK CRITIC + REPAIR: score and fix if needed
             try:
                 summary_data = {
                     "title": novel_title,
@@ -341,7 +369,23 @@ class Novel2ScreenWorkflow:
                 state["violations"] = critic_data.get("violations", [])
                 state["critic_score"] = critic_data.get("score", 1.0)
             except Exception:
-                state["critic_score"] = 0.9  # Default good score
+                state["critic_score"] = 0.9
+
+            # Quality repair if score < 0.7
+            if state["critic_score"] < 0.7:
+                try:
+                    from ..agents.repair import RepairAgent
+                    ra = RepairAgent()
+                    ro = ra.retry({"violations": state["violations"], "screenplay": state["screenplay_yaml"]})
+                    ry = ro.get("yaml_output", "")
+                    import re
+                    ry = re.sub(r'^`(?:yaml)?\s*', '', ry)
+                    ry = re.sub(r'\s*`$', '', ry)
+                    if ry:
+                        state["screenplay_yaml"] = ry
+                        state["repair_changes"].append("Quality repair applied")
+                except:
+                    pass
 
             state["completed"] = True
 

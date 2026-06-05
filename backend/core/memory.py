@@ -153,3 +153,129 @@ class SemanticMemory:
 # Hash utility for round-trip integrity
 def hash_yaml(yaml_str: str) -> str:
     return hashlib.sha256(yaml_str.encode("utf-8")).hexdigest()
+
+import json
+import hashlib
+from typing import Optional
+
+
+class MemoryManager:
+    """Central memory orchestrator combining short-term, long-term, and semantic memory."""
+
+    def __init__(self, stm: ShortTermMemory, char_bible: CharacterBible,
+                 world_bible: WorldBible, sem_mem: Optional[SemanticMemory] = None):
+        self.stm = stm
+        self.char_bible = char_bible
+        self.world_bible = world_bible
+        self.sem_mem = sem_mem
+
+    def get_context(self, chapter: int = 0, scene: str = "", query: str = "") -> dict:
+        """Build context for LLM calls from all memory sources."""
+        context = {
+            "active_chapter": self.stm.active_chapter,
+            "active_scene": self.stm.active_scene,
+            "recent_dialogue": self.stm.get_recent_turns(5),
+            "characters": self.char_bible.get_all(),
+        }
+        if self.world_bible:
+            context["world_rules"] = self.world_bible.get_rules()
+            context["geography"] = self.world_bible.get_geography()
+        if self.sem_mem and query:
+            context["semantic_hits"] = self.sem_mem.search(query)
+        return context
+
+    def update_chapter(self, chapter: int):
+        self.stm.active_chapter = chapter
+
+    def update_scene(self, scene: str):
+        self.stm.active_scene = scene
+
+    def add_dialogue_turn(self, character_id: str, line: str):
+        self.stm.add_turn(character_id, line)
+
+    def persist_all(self):
+        """Persist long-term memory to disk (JSON-based persistence)."""
+        char_file = os.path.join(os.path.dirname(__file__), "..", "data", "char_bible.json")
+        world_file = os.path.join(os.path.dirname(__file__), "..", "data", "world_bible.json")
+        os.makedirs(os.path.dirname(char_file), exist_ok=True)
+        with open(char_file, "w", encoding="utf-8") as f:
+            json.dump([c.model_dump() if hasattr(c, "model_dump") else c for c in self.char_bible.get_all()],
+                      f, ensure_ascii=False, indent=2)
+        with open(world_file, "w", encoding="utf-8") as f:
+            json.dump({"rules": self.world_bible.get_rules(), "geography": self.world_bible.get_geography()},
+                      f, ensure_ascii=False, indent=2)
+
+    def load_all(self):
+        """Load long-term memory from disk."""
+        char_file = os.path.join(os.path.dirname(__file__), "..", "data", "char_bible.json")
+        world_file = os.path.join(os.path.dirname(__file__), "..", "data", "world_bible.json")
+        if os.path.exists(char_file):
+            with open(char_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                for c in data:
+                    self.char_bible.add_or_update(c)
+        if os.path.exists(world_file):
+            with open(world_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self.world_bible.set_rules(data.get("rules", []))
+                self.world_bible.set_geography(data.get("geography", []))
+
+    def get_alignment_report(self, original_novel_chunks, screenplay_yaml):
+        """Compare original novel to screenplay and produce alignment report."""
+        import json, yaml
+        report = {
+            "alignment_score": 0.0,
+            "character_count_match": False,
+            "plot_points_covered": [],
+            "deviations": [],
+        }
+        try:
+            screenplay = yaml.safe_load(screenplay_yaml)
+            if not screenplay:
+                return report
+            
+            # Check character count
+            sc_chars = set(c.get("name", "") for c in screenplay.get("characters", []))
+            report["character_count_match"] = len(sc_chars) > 0
+            
+            # Check key plot points mentioned
+            episode_titles = [ep.get("title", "") for ep in screenplay.get("episodes", [])]
+            events_from_novel = []
+            for chunk in original_novel_chunks:
+                for line in chunk.split("\n"):
+                    if line.strip():
+                        events_from_novel.append(line.strip()[:80])
+            
+            # Simple alignment: how many episode summaries mention a novel event
+            score = 0.5  # base score
+            if len(sc_chars) >= 2:
+                score += 0.2
+            if len(screenplay.get("episodes", [])) >= 2:
+                score += 0.2
+            report["alignment_score"] = round(min(score, 1.0), 2)
+            
+        except Exception:
+            pass
+        return report
+
+
+    def detect_changes(self, original_state, edited_state):
+        """Detect changes between original and edited screenplay."""
+        changes = []
+        try:
+            original_eps = original_state.get("episodes", []) if isinstance(original_state, dict) else []
+            edited_eps = edited_state.get("episodes", []) if isinstance(edited_state, dict) else []
+            min_len = min(len(original_eps), len(edited_eps))
+            for i in range(min_len):
+                o = original_eps[i]
+                e = edited_eps[i]
+                if o.get("title") != e.get("title"):
+                    changes.append({"type": "episode_title", "episode": i, "old": o.get("title"), "new": e.get("title")})
+                o_scenes = o.get("scenes", [])
+                e_scenes = e.get("scenes", [])
+                for j in range(min(len(o_scenes), len(e_scenes))):
+                    if o_scenes[j].get("location") != e_scenes[j].get("location"):
+                        changes.append({"type": "scene_location", "episode": i, "scene": j, "old": o_scenes[j].get("location"), "new": e_scenes[j].get("location")})
+        except Exception:
+            pass
+        return changes

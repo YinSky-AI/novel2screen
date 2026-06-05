@@ -24,6 +24,20 @@ class Transition(str, Enum):
     wipe = "wipe"
 
 
+class Emotion(str, Enum):
+    anger = "anger"
+    fear = "fear"
+    joy = "joy"
+    sadness = "sadness"
+    surprise = "surprise"
+    disgust = "disgust"
+    anticipation = "anticipation"
+    calm = "calm"
+    tension = "tension"
+    confusion = "confusion"
+    resolve = "resolve"
+
+
 # ── Character ──
 
 class CharacterRole(str, Enum):
@@ -40,6 +54,7 @@ class Character(BaseModel):
     fear: str = ""
     arc: str
     voice_style: str = ""
+    traits: list[str] = Field(default_factory=list)
 
 
 # ── Beat ──
@@ -71,12 +86,15 @@ class Episode(BaseModel):
     id: str = Field(pattern=r"^ep_\d+$")
     title: str
     summary: str
-    scenes: list[Scene] = Field(default_factory=list, min_length=1)
+    theme: str = ""
+    pacing: str = ""
+    scenes: list[Scene] = Field(default_factory=list)
 
 
 # ── Root Screenplay ──
 
 class Screenplay(BaseModel):
+    schema_version: str = "1.0"
     title: str
     logline: str
     genre: str

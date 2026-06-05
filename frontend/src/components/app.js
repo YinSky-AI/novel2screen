@@ -81,7 +81,8 @@ function displayScreenplay(yaml, result) {
             '<span class="stat-badge">' + (result.chapters_processed || '?') + ' 章</span>',
             '<span class="stat-badge">' + (result.characters_extracted || '?') + ' 角色</span>',
             '<span class="stat-badge">' + (result.episodes_planned || '?') + ' 集</span>',
-            '<span class="stat-badge">' + (result.scenes_written || '?') + ' 场</span>'
+            '<span class="stat-badge">' + (result.scenes_written || '?') + ' 场</span>',
+            '<span class="stat-badge">' + (result.critic_score ? (result.critic_score * 100).toFixed(0) + '/100' : '?') + '</span>'
         ].join('');
     }
     c.innerHTML = '<div class="yaml-viewer">' + escapeHtml(yaml) + '</div>';

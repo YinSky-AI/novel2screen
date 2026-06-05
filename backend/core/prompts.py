@@ -101,7 +101,8 @@ Output format (JSON):
 
 # ── Episode Planner ──
 
-EPISODE_PLANNER_SYSTEM = """You are an Episode Planner structuring chapters into screenplay episodes."""
+EPISODE_PLANNER_SYSTEM = """You are an Episode Planner structuring chapters into screenplay episodes.
+Output episodes with "id", "title", "summary" fields only. Per-episode scene planning comes later."""
 
 EPISODE_PLANNER_USER = """Plan the screenplay episode structure from the narrative analysis.
 Group events into episodes (3-5 scenes each). Each episode needs:
@@ -128,7 +129,7 @@ Each scene must include:
 - time
 - objective
 - conflict
-- emotion
+- emotion (one of: anger, fear, joy, sadness, surprise, disgust, anticipation, calm, tension, confusion, resolve)
 
 Episode context: {episode_summary}
 Characters: {characters}
@@ -149,7 +150,9 @@ Rules:
 2. Dialogue must advance plot or reveal character
 3. No exposition dumps (max 3 lines of uninterrupted exposition)
 4. Include camera directions as visual_focus
-5. Include sound/audio cues as sound_effect"""
+5. Include sound/audio cues as sound_effect
+6. emotion MUST be one of: anger, fear, joy, sadness, surprise, disgust, anticipation, calm, tension, confusion, resolve
+7. transition MUST be one of: cut, fade, dissolve, wipe"""
 
 DIALOGUE_USER = """Write the full screenplay scene with dialogue and action beats.
 
@@ -201,24 +204,24 @@ Output valid YAML string only, no markdown fences."""
 CRITIC_SYSTEM = """You are a Screenplay Critic evaluating quality and consistency.
 Check for: continuity, pacing, character motivation, dialogue quality, shootability, line balance."""
 
-CRITIC_USER = """Review this screenplay and identify violations:
+CRITIC_USER = """Review this screenplay thoroughly and identify violations.
 
 Screenplay:
 {screenplay}
 
-Check these categories:
-1. continuity - references to previous scenes
-2. pacing - scenes per episode ≤ 12
-3. character_motivation - goal/arc alignment
-4. dialogue_quality - no repetitive filler
-5. shootability - no internal thoughts as action
-6. line_balance - Gini coefficient < 0.6
+Scoring Rubric (average all categories for final score):
+  0.0-0.3=poor needs rewrite, 0.3-0.6=fair needs revision, 0.6-0.8=good minor issues, 0.8-1.0=excellent
 
-Output format (JSON):
-{{
-  "violations": [{{"category": str, "severity": "error"|"warning", "description": str, "location": str}}],
-  "score": float
-}}"""
+Categories:
+1. continuity (error=missing causal link, warning=skip logic)
+2. pacing (error=scenes/ep>12 or all same length, warning=tonal whiplash)
+3. character_motivation (error=action contradicts goal/arc, warning=unexplained)
+4. dialogue_quality (error=exposition>3 lines, warning=stilted/repetitive)
+5. shootability (error=internal thought as action, warning=missing visual cue)
+6. line_balance (error=one char>60% lines, warning=char missing from scene)
+
+Output JSON:
+{{"violations": [{{"category": str, "severity": "error"|"warning", "description": str, "location": str}}], "score": float}}"""
 
 
 # ── Repair Agent ──
@@ -226,15 +229,23 @@ Output format (JSON):
 REPAIR_SYSTEM = """You are a Screenplay Repair Agent fixing issues found by the Critic.
 Auto-fix capabilities: timeline conflicts, duplicate scenes, character drift, schema violations."""
 
-REPAIR_USER = """Fix the following issues in this screenplay:
+REPAIR_USER = """Fix the following issues in this screenplay. Fix ALL errors.
 
-Issues to fix:
+Issues to fix (error=MUST fix, warning=SHOULD fix):
 {violations}
 
 Screenplay:
 {screenplay}
 
-Output the complete corrected screenplay YAML."""
+Fix rules:
+- continuity: add missing callbacks or adjust scene order
+- pacing: merge/split scenes, vary durations
+- character_motivation: adjust dialogue to match goals
+- dialogue_quality: trim exposition, add subtext
+- shootability: replace internal thoughts with visible action
+- line_balance: redistribute lines among characters
+
+Output the complete corrected screenplay YAML. No markdown."""
 
 
 # ── Bidirectional Consistency Agent ──
@@ -261,14 +272,15 @@ Output format (JSON):
 # ── Combined Preprocessor (Fast Mode) ──
 
 PREPROCESS_SYSTEM = """You are a Novel-to-Screenplay Preprocessor. In a single pass, extract everything needed for adaptation.
-Output compact JSON. Be concise — prefer short descriptions over long ones."""
+Output compact JSON. Be concise — prefer short descriptions over long ones.
+LANGUAGE: Respond in the same language as the input novel."""
 
 PREPROCESS_USER = """Analyze this novel and output a compact JSON with ALL of the following in one response:
 
 1. **theme**: Core theme in 1 sentence
 2. **major_events**: Top 10 key plot events. Each: {{"ch": chapter_number, "desc": "brief description", "chars": ["name"]}}
 3. **turning_points**: 3-5 key twists. Each: {{"ch": chapter_number, "desc": "brief", "impact": "brief"}}
-4. **characters**: All named characters. Each: {{"id": "char_001", "name": "...", "role": "protagonist|antagonist|supporting", "goal": "brief", "fear": "brief", "arc": "brief", "voice": "how they speak in 5 words"}}
+4. **characters**: All named characters. Each: {{"id": "char_001", "name": "...", "role": "protagonist|antagonist|supporting", "goal": "brief", "fear": "brief", "arc": "brief", "voice_style": "how they speak (short description)", "traits": ["trait1", "trait2", "trait3"]}}
 5. **locations**: Key locations. Each: {{"name": "...", "desc": "brief", "scenes": ["what happens here"]}}
 
 Novel chapters:
@@ -280,7 +292,9 @@ Format: {{"theme": str, "major_events": [...], "turning_points": [...], "charact
 # ── Combined Episode + Scene Planner (Batch) ──
 
 BATCH_PLAN_SYSTEM = """You are a Screenplay Planner. Plan ALL episodes and scenes in ONE response.
-Be concise. Focus on structure, not prose."""
+Be concise. Focus on structure, not prose.
+IMPORTANT: Use the key name "scenes" for each episode's scene list, NOT "chapters".
+LANGUAGE: Respond in the same language as the input novel. Only use English for schema field names (character_id, type, emotion, scene_id, etc.)."""
 
 BATCH_PLAN_USER = """Given the novel analysis, plan a complete screenplay structure:
 
@@ -291,6 +305,14 @@ Key Events: {major_events}
 Turning Points: {turning_points}
 Locations: {locations}
 Mode: {mode} (aim for 3-5 episodes)
+
+QUALITY REQUIREMENTS (score down if not met):
+1. Each scene advances plot OR reveals character (not both = weak)
+2. Beats alternate action/dialogue (no monologue blocks >3)
+3. Scene durations vary by content (short=1-2m, medium=3-4m, long=5-6m)
+4. Transitions vary: cut, fade, dissolve, wipe
+5. Every scene must include characters_present list of character_ids
+6. Every dialogue beat must include character_id (NOT character name)
 
 Output format (JSON only, no fences):
 {{
@@ -309,9 +331,9 @@ Output format (JSON only, no fences):
           "emotion": "Dominant emotion",
           "characters_present": ["name"],
           "beats": [
-            {{"type": "action|dialogue|reaction", "character": "name or null", "content": "what happens or is said", "emotion": "mood"}}
+            {{"type": "action|dialogue|reaction", "character_id": "char_001 or null for action beats", "content": "what happens or is said", "emotion": "anger|fear|joy|sadness|surprise|disgust|anticipation|calm|tension|confusion|resolve"}}
           ],
-          "transition": "cut to|fade|dissolve",
+          "transition": "cut|fade|dissolve|wipe",
           "duration": "2-5min"
         }}
       ]
@@ -321,13 +343,19 @@ Output format (JSON only, no fences):
 
 # ── Simplified Critic (Fast) ──
 
-FAST_CRITIC_SYSTEM = """You are a quick screenplay reviewer. Check only critical issues."""
+FAST_CRITIC_SYSTEM = """You are a screenplay quality analyst. Score strictly and fairly."""
 
-FAST_CRITIC_USER = """Quick review — flag only serious problems:
+FAST_CRITIC_USER = """Score this screenplay strictly (0.0-1.0).
 
 Screenplay summary: {summary}
 
+Key factors:
+- Pacing: 3-6 scenes/episode ideal, >8 or <2 penalize
+- Dialogue: varied, no exposition dumps (>3 lines)
+- Structure: every scene advances plot or character
+- Duration: should vary across scenes (not all same)
+
 Output JSON:
 {{"violations": [{{"category": str, "severity": "warning|error", "description": str}}], "score": 0.0-1.0}}
-Return empty violations if fine. Keep descriptions under 15 words."""
+Score anchors: 0.95=professional, 0.85=good, 0.70=fair, 0.50=poor, 0.30=failed"""
 

@@ -20,6 +20,11 @@ class AgentBase(ABC):
         self.model = model
         self.max_retries = max_retries
         self.attempt_count = 0
+        try:
+            from ..core.router import ModelRouter
+            self.router = ModelRouter()
+        except Exception:
+            self.router = None
 
     @abstractmethod
     def run(self, input_data: dict) -> dict:
@@ -60,6 +65,20 @@ class AgentBase(ABC):
         raise AgentError(
             f"Agent '{self.name}' failed after {self.max_retries + 1} attempts. "
             f"Last error: {last_error}"
+        )
+
+    def get_llm_response(self, system_prompt: str, user_prompt: str,
+                          temperature: float = 0.3) -> str:
+        """Route LLM call through ModelRouter if available."""
+        if self.router:
+            agent_key = self.name.replace("Agent", "").lower()
+            return self.router.execute(agent_key, system_prompt, user_prompt, temperature)
+        from ..core.llm import llm_client
+        return llm_client.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=self.model,
+            temperature=temperature,
         )
 
     def get_attempt_count(self) -> int:
