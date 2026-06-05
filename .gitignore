@@ -26,11 +26,6 @@ htmlcov/
 *.db
 *.sqlite3
 
-# Temp files
-_test_pipe.py
-replace_method.py
-temp_*.py
-
 # Data
 data/chroma_db/
 data/exports/
