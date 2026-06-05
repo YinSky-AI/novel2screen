@@ -289,6 +289,23 @@ Novel chapters:
 Output ONLY valid JSON, no markdown fences, no explanation.
 Format: {{"theme": str, "major_events": [...], "turning_points": [...], "characters": [...], "locations": [...]}}"""
 
+PREPROCESS_USER_WITH_RAG = """Analyze this novel and output a compact JSON with ALL of the following in one response.
+
+REFERENCE CONTEXT (use these retrieved passages to enrich your analysis):
+{rag_context}
+
+1. **theme**: Core theme in 1 sentence
+2. **major_events**: Top 10 key plot events. Each: {{"ch": chapter_number, "desc": "brief description", "chars": ["name"]}}
+3. **turning_points**: 3-5 key twists. Each: {{"ch": chapter_number, "desc": "brief", "impact": "brief"}}
+4. **characters**: All named characters. Each: {{"id": "char_001", "name": "...", "role": "protagonist|antagonist|supporting", "goal": "brief", "fear": "brief", "arc": "brief", "voice_style": "how they speak (short description)", "traits": ["trait1", "trait2", "trait3"]}}
+5. **locations**: Key locations. Each: {{"name": "...", "desc": "brief", "scenes": ["what happens here"]}}
+
+Novel chapters (may be truncated; use reference context above for details):
+{chapters_text}
+
+Output ONLY valid JSON, no markdown fences, no explanation.
+Format: {{"theme": str, "major_events": [...], "turning_points": [...], "characters": [...], "locations": [...]}}"""
+
 # ── Combined Episode + Scene Planner (Batch) ──
 
 BATCH_PLAN_SYSTEM = """You are a Screenplay Planner. Plan ALL episodes and scenes in ONE response.
@@ -297,6 +314,54 @@ IMPORTANT: Use the key name "scenes" for each episode's scene list, NOT "chapter
 LANGUAGE: Respond in the same language as the input novel. Only use English for schema field names (character_id, type, emotion, scene_id, etc.)."""
 
 BATCH_PLAN_USER = """Given the novel analysis, plan a complete screenplay structure:
+
+**Novel Analysis:**
+Theme: {theme}
+Characters: {characters}
+Key Events: {major_events}
+Turning Points: {turning_points}
+Locations: {locations}
+Mode: {mode} (aim for 3-5 episodes)
+
+QUALITY REQUIREMENTS (score down if not met):
+1. Each scene advances plot OR reveals character (not both = weak)
+2. Beats alternate action/dialogue (no monologue blocks >3)
+3. Scene durations vary by content (short=1-2m, medium=3-4m, long=5-6m)
+4. Transitions vary: cut, fade, dissolve, wipe
+5. Every scene must include characters_present list of character_ids
+6. Every dialogue beat must include character_id (NOT character name)
+
+Output format (JSON only, no fences):
+{{
+  "episodes": [
+    {{
+      "id": "ep_001",
+      "title": "Episode Title",
+      "summary": "1-sentence summary",
+      "scenes": [
+        {{
+          "scene_id": "sc_001",
+          "location": "Location Name",
+          "time": "Morning|Afternoon|Evening|Night",
+          "objective": "What happens in this scene",
+          "conflict": "The tension in this scene",
+          "emotion": "Dominant emotion",
+          "characters_present": ["name"],
+          "beats": [
+            {{"type": "action|dialogue|reaction", "character_id": "char_001 or null for action beats", "content": "what happens or is said", "emotion": "anger|fear|joy|sadness|surprise|disgust|anticipation|calm|tension|confusion|resolve"}}
+          ],
+          "transition": "cut|fade|dissolve|wipe",
+          "duration": "2-5min"
+        }}
+      ]
+    }}
+  ]
+}}"""
+
+BATCH_PLAN_USER_WITH_RAG = """Given the novel analysis, plan a complete screenplay structure.
+
+REFERENCE CONTEXT (retrieved passages from the novel - use these to enrich scene detail):
+{rag_context}
 
 **Novel Analysis:**
 Theme: {theme}

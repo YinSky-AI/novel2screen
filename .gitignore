@@ -7,6 +7,9 @@ venv/
 
 # Data
 data/exports/*.yaml
+data/chroma_db/
+data/test_chroma/
+backend/data/
 
 # IDE
 .vscode/

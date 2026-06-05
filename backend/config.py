@@ -17,13 +17,14 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./novel2screen.db")
 
-# Vector DB
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
+# Vector DB (ChromaDB - embedded, no external service required)
+CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./data/chroma_db")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 CHUNK_SIZE = 1500
 CHUNK_OVERLAP = 200
 TOP_K_LONG = 5
 TOP_K_SHORT = 3
+RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
 
 # Task limits
 MAX_RETRIES = 2
