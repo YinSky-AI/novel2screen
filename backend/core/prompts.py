@@ -277,7 +277,7 @@ LANGUAGE: Respond in the same language as the input novel."""
 PREPROCESS_USER = """Analyze this novel and output a compact JSON with ALL of the following in one response:
 
 1. **theme**: Core theme in 1 sentence
-2. **major_events**: Top 10 key plot events. Each: {{"ch": chapter_number, "desc": "brief description", "chars": ["name"]}}
+2. **major_events**: ALL significant plot events - extract as many as exist (aim for 15-25 for 5+ chapters). Each: {{"ch": chapter_number, "desc": "description", "chars": ["names involved"]}}
 3. **turning_points**: 3-5 key twists. Each: {{"ch": chapter_number, "desc": "brief", "impact": "brief"}}
 4. **characters**: All named characters. Each: {{"id": "char_001", "name": "...", "role": "protagonist|antagonist|supporting", "goal": "brief", "fear": "brief", "arc": "brief", "voice_style": "how they speak (short description)", "traits": ["trait1", "trait2", "trait3"]}}
 5. **locations**: Key locations. Each: {{"name": "...", "desc": "brief", "scenes": ["what happens here"]}}
@@ -294,7 +294,7 @@ REFERENCE CONTEXT (use these retrieved passages to enrich your analysis):
 {rag_context}
 
 1. **theme**: Core theme in 1 sentence
-2. **major_events**: Top 10 key plot events. Each: {{"ch": chapter_number, "desc": "brief description", "chars": ["name"]}}
+2. **major_events**: ALL significant plot events - extract as many as exist (aim for 15-25 for 5+ chapters). Each: {{"ch": chapter_number, "desc": "description", "chars": ["names involved"]}}
 3. **turning_points**: 3-5 key twists. Each: {{"ch": chapter_number, "desc": "brief", "impact": "brief"}}
 4. **characters**: All named characters. Each: {{"id": "char_001", "name": "...", "role": "protagonist|antagonist|supporting", "goal": "brief", "fear": "brief", "arc": "brief", "voice_style": "how they speak (short description)", "traits": ["trait1", "trait2", "trait3"]}}
 5. **locations**: Key locations. Each: {{"name": "...", "desc": "brief", "scenes": ["what happens here"]}}

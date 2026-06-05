@@ -182,6 +182,31 @@ class Novel2ScreenWorkflow:
             state["episode_plan"] = {"episodes": plan.get("episodes", [])}
 
             raw_episodes = plan.get("episodes", [])
+            # Normalize: fix LLM output format issues
+            _filtered_eps = []
+            for ep in raw_episodes:
+                if not isinstance(ep, dict):
+                    continue
+                # Skip: this is a scene at episode level (has location, no title/summary)
+                if "location" in ep and "title" not in ep and "summary" not in ep:
+                    continue
+                # Ensure id field
+                if "id" not in ep:
+                    if "scene_id" in ep:
+                        ep["id"] = ep.pop("scene_id")
+                    else:
+                        ep["id"] = f"ep_{len(_filtered_eps)+1:03d}"
+                # Fix sc_xxx -> ep_xxx prefix
+                if isinstance(ep["id"], str) and ep["id"].startswith("sc_"):
+                    ep["id"] = "ep_" + ep["id"][3:]
+                # Fill missing required fields
+                if not ep.get("title"):
+                    ep["title"] = f"Episode {len(_filtered_eps)+1}"
+                if not ep.get("summary"):
+                    ep["summary"] = f"Episode {len(_filtered_eps)+1}"
+                ep.setdefault("scenes", [])
+                _filtered_eps.append(ep)
+            raw_episodes = _filtered_eps
             if not raw_episodes:
                 raw_episodes = [{"id": "ep_001", "title": novel_title or "Adaptation", "summary": "Auto-generated",
                     "scenes": [{"scene_id": "sc_001", "location": "Main", "time": "Unknown",
