@@ -78,7 +78,7 @@ def yaml_to_screenplay(yaml_str: str) -> Screenplay:
         Character(
             id=c["id"],
             name=c["name"],
-            role=CharacterRole(c["role"]),
+            role=c["role"],
             goal=c.get("goal", ""),
             fear=c.get("fear", ""),
             arc=c.get("arc", ""),

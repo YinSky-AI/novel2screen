@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from backend.core.preprocessor import (
     chunk_paragraphs,
+    detect_key_points,
     detect_language,
+    evaluate_yaml_quality,
     extract_named_entities,
     parse_chapters,
 )
@@ -81,3 +83,126 @@ class TestExtractNamedEntities:
         assert isinstance(result, dict)
         assert "characters" in result
         assert "locations" in result
+
+
+class TestDetectKeyPoints:
+    def test_extracts_dialogues_from_chinese_text(self) -> None:
+        result = detect_key_points(SAMPLE_CN)
+        assert len(result["dialogues"]) >= 2
+        assert any("我必须走" in d for d in result["dialogues"])
+
+    def test_extracts_dialogues_from_english_text(self) -> None:
+        result = detect_key_points(SAMPLE_EN)
+        assert len(result["dialogues"]) >= 2
+        assert any("Who's there" in d for d in result["dialogues"])
+
+    def test_returns_first_and_last_chars(self) -> None:
+        result = detect_key_points(SAMPLE_CN)
+        assert len(result["first_chars"]) > 0
+        assert len(result["last_chars"]) > 0
+        assert "少年林风" in result["first_chars"]
+
+    def test_returns_ending_sentences(self) -> None:
+        result = detect_key_points(SAMPLE_CN)
+        assert len(result["ending_sentences"]) >= 1
+
+    def test_returns_must_preserve_string(self) -> None:
+        result = detect_key_points(SAMPLE_CN)
+        assert len(result["must_preserve"]) > 50
+        assert "文本开头" in result["must_preserve"]
+        assert "文本结尾" in result["must_preserve"]
+
+    def test_returns_time_location_pairs(self) -> None:
+        result = detect_key_points(SAMPLE_CN)
+        assert isinstance(result["time_location_pairs"], list)
+
+
+class TestEvaluateYamlQuality:
+    def test_detects_valid_yaml(self) -> None:
+        yaml_str = """
+episodes:
+- scenes:
+  - beats:
+    - type: dialogue
+      character_id: char_001
+      content: Hello
+      emotion: joy
+    duration_estimate: 60s
+  - beats:
+    - type: action
+      content: walks
+      emotion: tension
+    duration_estimate: 120s
+"""
+        result = evaluate_yaml_quality(yaml_str)
+        assert result["valid_yaml"] is True
+        assert result["beat_count"] >= 2
+
+    def test_detects_missing_emotions(self) -> None:
+        yaml_str = """
+episodes:
+- scenes:
+  - beats:
+    - type: action
+      content: test
+      emotion: null
+    duration_estimate: 60s
+"""
+        result = evaluate_yaml_quality(yaml_str)
+        assert result["emotion_null_rate"] > 0.8
+        assert any("Emotion missing" in i for i in result["issues"])
+
+    def test_detects_missing_character_ids(self) -> None:
+        yaml_str = """
+episodes:
+- scenes:
+  - beats:
+    - type: dialogue
+      character_id: null
+      content: test
+      emotion: fear
+    - type: dialogue
+      character_id: char_001
+      content: test2
+      emotion: anger
+    duration_estimate: 60s
+"""
+        result = evaluate_yaml_quality(yaml_str)
+        assert result["char_id_null_rate"] >= 0.4
+
+    def test_detects_low_duration_diversity(self) -> None:
+        yaml_str = """
+episodes:
+- scenes:
+  - beats:
+    - type: action
+      content: t1
+    duration_estimate: 60s
+  - beats:
+    - type: action
+      content: t2
+    duration_estimate: 60s
+  - beats:
+    - type: action
+      content: t3
+    duration_estimate: 60s
+"""
+        result = evaluate_yaml_quality(yaml_str)
+        assert result["duration_diversity"] > 0.9
+        assert any("duration" in i.lower() for i in result["issues"])
+
+    def test_reports_invalid_yaml(self) -> None:
+        result = evaluate_yaml_quality("not: valid: [[[ yaml: [}")
+        assert result["valid_yaml"] is False
+
+    def test_detects_too_few_beats(self) -> None:
+        yaml_str = """
+episodes:
+- scenes:
+  - beats:
+    - type: action
+      content: only one
+    duration_estimate: 60s
+"""
+        result = evaluate_yaml_quality(yaml_str)
+        assert any("too condensed" in i.lower() or "only" in i.lower() for i in result["issues"])
