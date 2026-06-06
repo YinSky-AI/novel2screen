@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import pickle
+import re
 from typing import Any
 
 from backend.config import settings
@@ -255,11 +256,11 @@ class SemanticMemory:
     def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         self._ensure_initialized()
         if self._collection is None or self._embed_failed:
-            return self._keyword_search(query, top_k)
+            return self._jaccard_search_cjk(query, top_k)
         try:
             emb = self._embed([query])
             if self._embed_failed:
-                return self._keyword_search(query, top_k)
+                return self._jaccard_search_cjk(query, top_k)
             results = self._collection.query(query_embeddings=emb, n_results=top_k)
             hits: list[dict[str, Any]] = []
             if results and results["ids"] and results["ids"][0]:
@@ -272,8 +273,8 @@ class SemanticMemory:
                     })
             return hits
         except Exception as e:
-            logger.warning("ChromaDB search failed, using keyword fallback: %s", e)
-            return self._keyword_search(query, top_k)
+            logger.warning("ChromaDB search failed, using CJK keyword fallback: %s", e)
+            return self._jaccard_search_cjk(query, top_k)
 
     def retrieve_context(self, query: str, top_k: int = 3, max_chars: int = 3000) -> str:
         results = self.search(query, top_k)
@@ -292,6 +293,30 @@ class SemanticMemory:
     @staticmethod
     def _keyword_search(query: str, top_k: int = 5) -> list[dict[str, Any]]:
         return [{"id": "kw_fallback", "content": f"No semantic results for: {query}", "metadata": {}, "distance": 1.0}]
+
+    def _jaccard_search_cjk(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+        """Bigram-based search suitable for Chinese/CJK text."""
+        def _bigrams(text: str) -> set[str]:
+            clean = re.sub(r"\s+", "", text)
+            return {clean[i:i+2] for i in range(len(clean)-1)} if len(clean) >= 2 else set()
+
+        q_bigrams = _bigrams(query)
+        if not q_bigrams or not self._documents:
+            return [{"content": "", "id": "empty", "distance": 1.0}]
+
+        scored = []
+        for doc in self._documents:
+            content = doc.get("content", doc.get("text", ""))
+            if not content:
+                continue
+            d_bigrams = _bigrams(content)
+            if not d_bigrams:
+                continue
+            jaccard = len(q_bigrams & d_bigrams) / len(q_bigrams | d_bigrams)
+            scored.append((jaccard, {"content": content, "id": doc.get("id", ""), "distance": 1.0 - jaccard}))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [item for _, item in scored[:top_k] if item["content"]]
 
     def jaccard_search(self, query: str, documents: list[str], top_k: int = 5) -> list[str]:
         def _jaccard(a: set[str], b: set[str]) -> float:

@@ -41,11 +41,15 @@ class Novel2ScreenWorkflow:
         return parse_chapters(text)
 
     def _init_semantic_memory(self, novel_text: str) -> None:
-        chunks = self.memory_manager.semantic.chunk_text(novel_text)
-        if not chunks:
-            return
-        self.memory_manager.semantic.index(chunks)
-        logger.info("Indexed %d chunks into semantic memory", len(chunks))
+        try:
+            chunks = self.memory_manager.semantic.chunk_text(novel_text)
+            if not chunks:
+                return
+            docs = [{"text": c, "source": "novel"} for c in chunks]
+            self.memory_manager.semantic.index(docs)
+            logger.info("Indexed %d chunks", len(chunks))
+        except Exception as e:
+            logger.warning("ChromaDB index skipped: %s", e)
 
     def fast_run(self, novel_text: str, mode: str = "auto") -> dict[str, Any]:
         task_id = f"task_{uuid.uuid4().hex[:12]}"
