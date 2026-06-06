@@ -62,7 +62,11 @@ def _get_workflow() -> Novel2ScreenWorkflow:
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    return HealthResponse(status="ok", version="2.0.0")
+    return HealthResponse()
+
+@app.get("/")
+async def root() -> dict[str, str]:
+    return {"service": "Novel2Screen", "version": "2.0.0", "docs": "/docs", "frontend": "http://localhost:3000"}
 
 
 @app.post("/novels/upload", response_model=UploadResponse)

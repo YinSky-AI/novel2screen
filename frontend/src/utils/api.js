@@ -20,87 +20,83 @@ async function request(path, options = {}) {
   }
 
   if (!response.ok) {
-    if (response.status === 422) {
-      const errData = await response.json().catch(() => null);
+    let msg = `HTTP ${response.status}`;
+    try {
+      const errData = await response.json();
       if (errData && errData.detail) {
-        const messages = Array.isArray(errData.detail)
+        msg = Array.isArray(errData.detail)
           ? errData.detail.map((d) => {
               const loc = d.loc ? d.loc.join('.') : '';
               return `${loc}: ${d.msg}`;
             }).join('; ')
           : String(errData.detail);
-        throw new Error(messages);
       }
-    }
-    const text = await response.text().catch(() => 'Unknown error');
-    throw new Error(`HTTP ${response.status}: ${text}`);
+    } catch {}
+    throw new Error(msg);
   }
 
   if (response.status === 204) return null;
   return response.json();
 }
 
-function convertNovelText(text, mode, pipeline, language) {
-  return request('/api/v1/convert', {
+function convertNovelText(text, pipeline = 'fast', language = 'auto') {
+  return request('/convert', {
     method: 'POST',
-    body: { text, mode, pipeline, language },
+    body: { novel_text: text, pipeline, language },
   });
 }
 
-function uploadNovelFile(file, mode, pipeline, language) {
+function uploadNovelFile(file) {
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('mode', mode);
-  formData.append('pipeline', pipeline);
-  if (language) formData.append('language', language);
-  return request('/api/v1/convert/upload', {
+  return request('/novels/upload', {
     method: 'POST',
     body: formData,
   });
 }
 
-function generateScreenplay(taskId, mode, pipeline) {
-  return request('/api/v1/generate', {
+function generateScreenplay(taskId, mode = 'auto', pipeline = 'fast') {
+  return request(`/generate/${taskId}?mode=${mode}&pipeline=${pipeline}`, {
     method: 'POST',
-    body: { task_id: taskId, mode, pipeline },
   });
 }
 
 function getTaskStatus(taskId) {
-  return request(`/api/v1/tasks/${taskId}`);
+  return request(`/tasks/${taskId}`);
 }
 
-function exportYaml(taskId, format) {
-  return request(`/api/v1/tasks/${taskId}/export?format=${format || 'yaml'}`);
+function exportYaml(taskId) {
+  return request(`/export/yaml/${taskId}`);
 }
 
-function importEdits(taskId, file) {
-  const formData = new FormData();
-  formData.append('file', file);
-  return request(`/api/v1/tasks/${taskId}/import`, {
+function importEdits(taskId, yamlContent) {
+  return request(`/import-edits/${taskId}`, {
     method: 'POST',
-    body: formData,
+    body: { yaml_content: yamlContent },
   });
 }
 
 function getAlignment(taskId) {
-  return request(`/api/v1/tasks/${taskId}/alignment`);
+  return request(`/alignment/${taskId}`);
 }
 
-function validateYaml(taskId) {
-  return request(`/api/v1/tasks/${taskId}/validate`, { method: 'POST' });
+function validateYaml(yamlContent) {
+  return request('/validate', {
+    method: 'POST',
+    body: { yaml_content: yamlContent },
+  });
 }
 
 function getUsage() {
-  return request('/api/v1/usage');
+  return request('/usage');
 }
 
 function healthCheck() {
-  return request('/api/v1/health');
+  return request('/health');
 }
 
 function detectLanguage(text) {
-  return request('/api/v1/detect-language', {
+  return request('/detect-language', {
     method: 'POST',
     body: { text },
   });
@@ -108,7 +104,6 @@ function detectLanguage(text) {
 
 export {
   API_BASE,
-  request,
   convertNovelText,
   uploadNovelFile,
   generateScreenplay,

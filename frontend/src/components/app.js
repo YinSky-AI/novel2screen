@@ -360,7 +360,7 @@ async function handleConvert() {
 
   try {
     const mode = dom.pipelineMode.value;
-    const result = await convertNovelText(text, mode, 'default', currentLang);
+    const result = await convertNovelText(text, mode);
     state.taskId = result.task_id || result.id;
     startPolling();
     startTimer();
@@ -376,9 +376,10 @@ async function doFileUpload() {
   showStep(2);
 
   try {
+    const uploadResult = await uploadNovelFile(state.uploadFile);
+    state.taskId = uploadResult.task_id || uploadResult.id;
     const mode = dom.pipelineMode.value;
-    const result = await uploadNovelFile(state.uploadFile, mode, 'default', currentLang);
-    state.taskId = result.task_id || result.id;
+    await generateScreenplay(state.taskId, 'auto', mode);
     showToast(t('toastUploadSuccess'), 'success');
     startPolling();
     startTimer();
@@ -413,7 +414,7 @@ async function pollTask() {
     if (data.status === 'completed' || data.status === 'done') {
       stopPolling();
       stopTimer();
-      state.yamlContent = data.yaml || data.result || '';
+      state.yamlContent = data.yaml_content || data.output || '';
       showStep(3);
       renderYaml(state.yamlContent);
       showToast(t('toastConverted'), 'success');
@@ -569,7 +570,7 @@ async function handleValidate() {
   if (!state.taskId) return;
   dom.validationBadge.classList.add('hidden');
   try {
-    const result = await validateYaml(state.taskId);
+    const result = await validateYaml(state.yamlContent || '');
     if (result.valid || result.is_valid) {
       dom.validationBadge.textContent = '\u2714 ' + t('toastValidated');
       dom.validationBadge.className = 'badge badge-success';
@@ -662,7 +663,8 @@ function handleImportFileDrop(e) {
 async function doImportEdits(file) {
   if (!state.taskId) return;
   try {
-    await importEdits(state.taskId, file);
+    const yamlContent = await file.text();
+    await importEdits(state.taskId, yamlContent);
     showToast(t('toastEditsImported'), 'success');
     loadAlignment();
   } catch (err) {
