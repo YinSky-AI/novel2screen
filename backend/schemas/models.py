@@ -4,7 +4,7 @@ import re
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class BeatType(str, Enum):
@@ -54,6 +54,13 @@ class Scene(BaseModel):
     beats: list[Beat] = Field(default_factory=list)
     transition: Transition = Transition.CUT
     duration_estimate: str = "60s"
+
+    @field_validator("duration_estimate", mode="before")
+    @classmethod
+    def _coerce_duration(cls, v: Any) -> str:
+        if isinstance(v, int):
+            return f"{v}s"
+        return str(v)
 
 
 class Episode(BaseModel):
