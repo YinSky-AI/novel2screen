@@ -120,28 +120,50 @@ class Novel2ScreenWorkflow:
             return {"task_id": task_id, "yaml_content": "", "status": "failed"}
 
     def _build_screenplay(self, data: dict[str, Any]) -> Screenplay:
-        if "characters" in data:
-            from backend.schemas.models import Character, CharacterRole
-            characters = [
-                Character(
-                    id=c.get("id", f"char_{(i+1):03d}"),
-                    name=c.get("name", ""),
-                    role=CharacterRole(c.get("role", "supporting")),
-                    goal=c.get("goal", ""),
-                    fear=c.get("fear", ""),
-                    arc=c.get("arc", ""),
-                    voice_style=c.get("voice_style", ""),
-                )
-                for i, c in enumerate(data.get("characters", []))
-            ]
+        chars_raw = data.get("characters", [])
+        if isinstance(chars_raw, dict):
+            chars_raw = chars_raw.get("characters", [])
+        if not isinstance(chars_raw, list):
+            chars_raw = []
+
+        from backend.schemas.models import Character, CharacterRole
+        characters = [
+            Character(
+                id=c.get("id", f"char_{(i+1):03d}"),
+                name=c.get("name", ""),
+                role=CharacterRole(c.get("role", "supporting")),
+                goal=c.get("goal", ""),
+                fear=c.get("fear", ""),
+                arc=c.get("arc", ""),
+                voice_style=c.get("voice_style", ""),
+            )
+            for i, c in enumerate(chars_raw)
+            if isinstance(c, dict)
+        ]
+
+        narrative = data.get("narrative", {})
+        if isinstance(narrative, dict):
+            title = narrative.get("title", narrative.get("theme", "Untitled"))
+            theme = narrative.get("theme", "")
+            major_events = narrative.get("major_events", [])
+            logline = ". ".join(e.get("event", e.get("name", "")) for e in (major_events if isinstance(major_events, list) else [])[:3]) or "A story unfolds."
         else:
-            characters = []
+            title = "Untitled"
+            theme = ""
+            logline = ""
+
+        world = data.get("world", {})
+        genre = "drama"
+        if isinstance(world, dict):
+            rules = world.get("world_rules", world)
+            if isinstance(rules, dict) and rules.get("magic"):
+                genre = "fantasy"
 
         return Screenplay(
-            title=data.get("title", "Untitled"),
-            logline=data.get("logline", ""),
-            genre=data.get("genre", ""),
-            theme=data.get("theme", ""),
+            title=title,
+            logline=logline,
+            genre=genre,
+            theme=theme,
             characters=characters,
             episodes=[],
         )
