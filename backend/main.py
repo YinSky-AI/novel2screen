@@ -337,15 +337,12 @@ async def detect_novel_language(body: dict[str, Any]) -> DetectLanguageResponse:
 
 
 async def _run_generation(task_id: str, novel_text: str, mode: str, pipeline: str) -> None:
-    """Background generation task with progress tracking."""
+    """Background generation — workflow manages real-time progress updates."""
     wf = _get_workflow()
-    stages = [(15, "Analyzing narrative..."), (40, "Extracting characters..."), (70, "Building screenplay..."), (90, "Generating YAML...")] if pipeline == "fast" else [(10, "Analyzing narrative..."), (20, "Extracting characters..."), (30, "Analyzing world..."), (40, "Organizing timeline..."), (50, "Planning episodes..."), (60, "Planning scenes..."), (70, "Writing dialogue..."), (80, "Quality review..."), (90, "Generating YAML...")]
-    for pg, st in stages:
-        if task_id in _task_store:
-            _task_store[task_id]["progress"] = float(pg)
-            _task_store[task_id]["current_stage"] = st
+    if task_id in _task_store:
+        _task_store[task_id].update({"progress": 5.0, "current_stage": "Starting pipeline..."})
     try:
-        result = await asyncio.to_thread(wf.fast_run if pipeline == "fast" else wf.run, novel_text, mode)
+        result = await asyncio.to_thread(wf.fast_run if pipeline == "fast" else wf.run, novel_text, mode, task_id=task_id)
         status = result.get("status", "completed")
         yaml_content = result.get("yaml_content", "")
         if task_id in _task_store:

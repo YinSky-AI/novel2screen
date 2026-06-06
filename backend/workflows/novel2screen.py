@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging, uuid, yaml
-from typing import Any
+from typing import Any, Callable
 from backend.agents.character import CharacterAgent
 from backend.agents.consistency import ConsistencyAgent
 from backend.agents.critic import CriticAgent
@@ -33,6 +33,18 @@ class Novel2ScreenWorkflow:
         self._repair = RepairAgent(llm_client, memory_manager)
         self._consistency = ConsistencyAgent(llm_client, memory_manager)
 
+    def _update_progress(self, task_id: str, pct: float, stage: str) -> None:
+        """Update progress in the backend's task store if task_id is provided."""
+        if not task_id:
+            return
+        try:
+            from backend.main import _task_store  # type: ignore[attr-defined]
+            if task_id in _task_store:
+                _task_store[task_id]["progress"] = pct
+                _task_store[task_id]["current_stage"] = stage
+        except Exception:
+            pass
+
     def parse_and_segment(self, text: str) -> list[dict[str, str]]:
         from backend.core.preprocessor import parse_chapters
         return parse_chapters(text)
@@ -47,51 +59,56 @@ class Novel2ScreenWorkflow:
         except Exception as e:
             logger.warning("RAG index skipped: %s", e)
 
-    def fast_run(self, novel_text: str, mode: str = "auto") -> dict[str, Any]:
-        task_id = f"task_{uuid.uuid4().hex[:12]}"
+    def fast_run(self, novel_text: str, mode: str = "auto", task_id: str = "") -> dict[str, Any]:
+        tid = task_id or f"task_{uuid.uuid4().hex[:12]}"
         self._init_semantic_memory(novel_text)
-        # Key point detection for prompt guidance
         from backend.core.preprocessor import detect_key_points, detect_language
         key_points = detect_key_points(novel_text)
         must_preserve = key_points["must_preserve"]
         lang = detect_language(novel_text)
 
         try:
-            # Inject must-preserve hints into agent input
+            self._update_progress(tid, 15, "Analyzing narrative structure...")
             narrative = self._narrative.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
+
+            self._update_progress(tid, 40, "Extracting characters...")
             character_result = self._character.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
             chars_raw = character_result.get("characters", []) if isinstance(character_result, dict) else []
 
+            self._update_progress(tid, 60, "Writing scenes and dialogue...")
             events = narrative.get("major_events", []) if isinstance(narrative, dict) else []
             ep_scenes = self._llm_write_scenes(novel_text, events, chars_raw, must_preserve)
 
+            self._update_progress(tid, 85, "Assembling screenplay...")
             episodes = [{
                 "id": "ep_001",
                 "title": narrative.get("title", "Episode 1") if isinstance(narrative, dict) else "Episode 1",
                 "summary": narrative.get("logline", "") if isinstance(narrative, dict) else "",
                 "scenes": ep_scenes,
             }]
-
             screenplay = self._build_screenplay({
                 "narrative": narrative,
                 "characters": character_result,
                 "world": {},
                 "episodes": episodes,
             })
+
+            self._update_progress(tid, 95, "Generating YAML output...")
             yaml_content = screenplay_to_yaml(screenplay, lang)
             self._fidelity_check(novel_text, character_result)
 
-            # Auto quality evaluation
             from backend.core.preprocessor import evaluate_yaml_quality
             quality = evaluate_yaml_quality(yaml_content)
             logger.info("fast_run quality: emotion_null=%.1f%% char_id_null=%.1f%% dur_diversity=%.2f issues=%s",
                         quality["emotion_null_rate"] * 100, quality["char_id_null_rate"] * 100,
                         quality["duration_diversity"], quality["issues"])
 
-            return {"task_id": task_id, "yaml_content": yaml_content, "status": "completed", "quality": quality}
+            self._update_progress(tid, 100, "Complete!")
+            return {"task_id": tid, "yaml_content": yaml_content, "status": "completed", "quality": quality}
         except Exception:
             logger.exception("fast_run failed")
-            return {"task_id": task_id, "yaml_content": "", "status": "failed"}
+            self._update_progress(tid, 100, "Failed")
+            return {"task_id": tid, "yaml_content": "", "status": "failed"}
 
     def _llm_write_scenes(self, novel_text: str, events: list, characters: list, must_preserve: str = "") -> list[dict]:
         """Have LLM write proper screenplay scenes from narrative events."""
