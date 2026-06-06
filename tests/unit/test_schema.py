@@ -112,7 +112,7 @@ class TestScreenplayRoundtrip:
                                 Beat(type=BeatType.DIALOGUE, character_id="char_001", content="Testing...", emotion="focused"),
                             ],
                             transition=Transition.FADE,
-                            duration_estimate=90,
+                            duration_estimate="90s",
                         ),
                     ],
                 ),

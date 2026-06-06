@@ -53,30 +53,43 @@ class Novel2ScreenWorkflow:
         try:
             narrative = self._narrative.retry({"novel_text": novel_text})
             character_result = self._character.retry({"novel_text": novel_text})
+
+            # Build basic episodes from major_events
+            chars_raw = character_result.get("characters", []) if isinstance(character_result, dict) else []
+            episodes = []
+            events = narrative.get("major_events", []) if isinstance(narrative, dict) else []
+            if events:
+                ep_scenes = []
+                for i, ev in enumerate(events):
+                    if not isinstance(ev, dict):
+                        continue
+                    ep_scenes.append({
+                        "scene_id": f"sc_{(i+1):03d}",
+                        "location": ev.get("location", "Unknown"),
+                        "time": "Day",
+                        "beats": [{
+                            "type": "action",
+                            "content": ev.get("event", ev.get("description", "")),
+                            "emotion": None,
+                        }],
+                        "transition": "cut",
+                        "duration_estimate": "45s",
+                    })
+                episodes.append({
+                    "id": "ep_001",
+                    "title": narrative.get("title", "Episode 1"),
+                    "summary": narrative.get("logline", ""),
+                    "scenes": ep_scenes,
+                })
+
             screenplay = self._build_screenplay({
                 "narrative": narrative,
                 "characters": character_result,
                 "world": {},
-                "episodes": [],
+                "episodes": episodes,
             })
             yaml_content = screenplay_to_yaml(screenplay)
-            # Fidelity check: compare generated characters against source text entities
-            try:
-                from backend.core.preprocessor import extract_named_entities
-                src_entities = extract_named_entities(novel_text[:5000])
-                yaml_chars = set()
-                chars_data = character_result.get("characters", []) if isinstance(character_result, dict) else []
-                for c in chars_data:
-                    if isinstance(c, dict):
-                        name = c.get("name", "")
-                        if name:
-                            yaml_chars.add(name)
-                src_chars = set(src_entities.get("characters", []))
-                fabricated = yaml_chars - src_chars
-                if fabricated:
-                    logger.warning("Potential fabricated characters: %s", fabricated)
-            except Exception:
-                pass
+            self._fidelity_check(novel_text, character_result)
             return {"task_id": task_id, "yaml_content": yaml_content, "status": "completed"}
         except Exception:
             logger.exception("fast_run failed")
@@ -88,16 +101,38 @@ class Novel2ScreenWorkflow:
         try:
             narrative = self._narrative.retry({"novel_text": novel_text})
             character_result = self._character.retry({"novel_text": novel_text})
-            world_result = self._world.run({"novel_text": novel_text})
-            timeline = self._timeline.run({"novel_text": novel_text})
+            char_list = character_result.get("characters", []) if isinstance(character_result, dict) else []
 
-            ep_plan = self._episode_planner.run({"novel_text": novel_text})
+            world_result = self._world.run({"novel_text": novel_text})
+            _timeline = self._timeline.run({"novel_text": novel_text})
+
+            ep_plan = self._episode_planner.run({"novel_text": novel_text, "characters": char_list})
             episodes_data = ep_plan.get("episodes", [])
 
             assembled: list[dict[str, Any]] = []
             for ep in episodes_data:
-                scenes = self._scene_planner.run({"novel_text": novel_text, "episode": ep})
-                ep["scenes"] = scenes.get("scenes", [])
+                if not isinstance(ep, dict):
+                    continue
+                scenes_result = self._scene_planner.run({
+                    "episode_id": ep.get("id", "ep_001"),
+                    "summary": ep.get("summary", ""),
+                    "characters": char_list,
+                })
+                scenes_list = scenes_result.get("scenes", []) if isinstance(scenes_result, dict) else []
+
+                scenes_with_dialogue = []
+                for sc in scenes_list:
+                    if not isinstance(sc, dict):
+                        continue
+                    dialogue_result = self._dialogue.run({
+                        "scene": sc,
+                        "characters": char_list,
+                    })
+                    beats = dialogue_result.get("beats", []) if isinstance(dialogue_result, dict) else []
+                    sc["beats"] = beats if beats else [{"type": "action", "content": sc.get("objective", "Scene"), "emotion": None}]
+                    scenes_with_dialogue.append(sc)
+
+                ep["scenes"] = scenes_with_dialogue
                 assembled.append(ep)
 
             screenplay = self._build_screenplay({
@@ -114,28 +149,29 @@ class Novel2ScreenWorkflow:
                 repair = self._repair.run({"yaml_content": yaml_content, "violations": violations})
                 yaml_content = repair.get("repaired_yaml", yaml_content)
 
-            # Fidelity check: compare generated characters against source text entities
-            try:
-                from backend.core.preprocessor import extract_named_entities
-                src_entities = extract_named_entities(novel_text[:5000])
-                yaml_chars = set()
-                chars_data = character_result.get("characters", []) if isinstance(character_result, dict) else []
-                for c in chars_data:
-                    if isinstance(c, dict):
-                        name = c.get("name", "")
-                        if name:
-                            yaml_chars.add(name)
-                src_chars = set(src_entities.get("characters", []))
-                fabricated = yaml_chars - src_chars
-                if fabricated:
-                    logger.warning("Potential fabricated characters: %s", fabricated)
-            except Exception:
-                pass
-
+            self._fidelity_check(novel_text, character_result)
             return {"task_id": task_id, "yaml_content": yaml_content, "status": "completed"}
         except Exception:
             logger.exception("run failed")
             return {"task_id": task_id, "yaml_content": "", "status": "failed"}
+
+    def _fidelity_check(self, novel_text: str, character_result: dict) -> None:
+        try:
+            from backend.core.preprocessor import extract_named_entities
+            src_entities = extract_named_entities(novel_text[:5000])
+            yaml_chars = set()
+            chars_data = character_result.get("characters", []) if isinstance(character_result, dict) else []
+            for c in chars_data:
+                if isinstance(c, dict):
+                    name = c.get("name", "")
+                    if name:
+                        yaml_chars.add(name)
+            src_chars = set(src_entities.get("characters", []))
+            fabricated = yaml_chars - src_chars
+            if fabricated:
+                logger.warning("Potential fabricated characters: %s", fabricated)
+        except Exception:
+            pass
 
     def _build_screenplay(self, data: dict) -> Screenplay:
         narrative = data.get("narrative", {})

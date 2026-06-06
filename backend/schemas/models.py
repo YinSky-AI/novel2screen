@@ -53,7 +53,7 @@ class Scene(BaseModel):
     voice_over: str | None = None
     beats: list[Beat] = Field(default_factory=list)
     transition: Transition = Transition.CUT
-    duration_estimate: int = 60
+    duration_estimate: str = "60s"
 
 
 class Episode(BaseModel):

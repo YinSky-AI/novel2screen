@@ -53,7 +53,7 @@ def _mock_llm_chat(messages: list[dict[str, str]], *, model: str = "", temperatu
         return json.dumps({
             "episode_id": "ep_001",
             "scenes": [
-                {"scene_id": "sc_001", "location": "Home", "time": "Morning", "visual_focus": "Window", "sound_effect": "Wind", "voice_over": None, "transition": "cut", "duration_estimate": 60,
+                {"scene_id": "sc_001", "location": "Home", "time": "Morning", "visual_focus": "Window", "sound_effect": "Wind", "voice_over": None, "transition": "cut", "duration_estimate": "60s",
                  "beats": [{"type": "dialogue", "character_id": "char_001", "content": "Hello", "emotion": "hopeful"}]},
             ],
         }, ensure_ascii=False)

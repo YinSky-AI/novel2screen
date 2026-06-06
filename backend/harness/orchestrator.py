@@ -218,7 +218,7 @@ def _normalize_episodes(state: PipelineState) -> Screenplay | None:
                     voice_over=sc_data.get("voice_over"),
                     beats=beats,
                     transition=Transition(sc_data.get("transition", "cut")),
-                    duration_estimate=sc_data.get("duration_estimate", 60),
+                    duration_estimate=sc_data.get("duration_estimate", "60s"),
                 )
             )
 

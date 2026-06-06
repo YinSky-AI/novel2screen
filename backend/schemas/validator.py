@@ -98,7 +98,7 @@ def yaml_to_screenplay(yaml_str: str) -> Screenplay:
                     voice_over=s_data.get("voice_over"),
                     beats=beats,
                     transition=Transition(s_data.get("transition", "cut")),
-                    duration_estimate=s_data.get("duration_estimate", 60),
+duration_estimate="60s",
                 )
             )
         episodes.append(
@@ -187,7 +187,7 @@ episodes:
         visual_focus: "屏幕上流动的异常代码"
         sound_effect: "键盘敲击声"
         transition: "cut"
-        duration_estimate: 120
+        duration_estimate: "120s"
         beats:
           - type: "action"
             content: "林峰盯着屏幕，手指快速敲击键盘，额头上渗出细密的汗珠。"
@@ -207,7 +207,7 @@ episodes:
         visual_focus: "昏暗房间中笔记本屏幕的冷光"
         sound_effect: "窗外偶尔驶过的车辆声"
         transition: "dissolve"
-        duration_estimate: 90
+        duration_estimate: "90s"
         beats:
           - type: "action"
             content: "林峰坐在床边，笔记本放在膝盖上，手指悬停在键盘上方。"
@@ -232,7 +232,7 @@ episodes:
         visual_focus: "林峰手中的平板电脑，屏幕上显示着一个复杂的流程图"
         sound_effect: "轻柔的爵士乐，咖啡机的蒸汽声"
         transition: "cut"
-        duration_estimate: 150
+        duration_estimate: "150s"
         beats:
           - type: "dialogue"
             character_id: "char_001"
@@ -254,7 +254,7 @@ episodes:
         visual_focus: "一排排闪烁的服务器指示灯，地面上散落的电缆"
         sound_effect: "服务器的嗡鸣，远处传来脚步声"
         transition: "fade"
-        duration_estimate: 180
+        duration_estimate: "180s"
         beats:
           - type: "action"
             content: "林峰和苏瑶小心翼翼地穿过布满灰尘的机柜走廊。"
