@@ -1,5 +1,5 @@
 from __future__ import annotations
-import logging, uuid
+import logging, uuid, yaml
 from typing import Any
 from backend.agents.character import CharacterAgent
 from backend.agents.consistency import ConsistencyAgent
@@ -50,14 +50,20 @@ class Novel2ScreenWorkflow:
     def fast_run(self, novel_text: str, mode: str = "auto") -> dict[str, Any]:
         task_id = f"task_{uuid.uuid4().hex[:12]}"
         self._init_semantic_memory(novel_text)
+        # Key point detection for prompt guidance
+        from backend.core.preprocessor import detect_key_points, detect_language
+        key_points = detect_key_points(novel_text)
+        must_preserve = key_points["must_preserve"]
+        lang = detect_language(novel_text)
+
         try:
-            narrative = self._narrative.retry({"novel_text": novel_text})
-            character_result = self._character.retry({"novel_text": novel_text})
+            # Inject must-preserve hints into agent input
+            narrative = self._narrative.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
+            character_result = self._character.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
             chars_raw = character_result.get("characters", []) if isinstance(character_result, dict) else []
 
-            # Step 3: LLM writes actual scenes with dialogue beats
             events = narrative.get("major_events", []) if isinstance(narrative, dict) else []
-            ep_scenes = self._llm_write_scenes(novel_text, events, chars_raw)
+            ep_scenes = self._llm_write_scenes(novel_text, events, chars_raw, must_preserve)
 
             episodes = [{
                 "id": "ep_001",
@@ -72,20 +78,29 @@ class Novel2ScreenWorkflow:
                 "world": {},
                 "episodes": episodes,
             })
-            yaml_content = screenplay_to_yaml(screenplay)
+            yaml_content = screenplay_to_yaml(screenplay, lang)
             self._fidelity_check(novel_text, character_result)
-            return {"task_id": task_id, "yaml_content": yaml_content, "status": "completed"}
+
+            # Auto quality evaluation
+            from backend.core.preprocessor import evaluate_yaml_quality
+            quality = evaluate_yaml_quality(yaml_content)
+            logger.info("fast_run quality: emotion_null=%.1f%% char_id_null=%.1f%% dur_diversity=%.2f issues=%s",
+                        quality["emotion_null_rate"] * 100, quality["char_id_null_rate"] * 100,
+                        quality["duration_diversity"], quality["issues"])
+
+            return {"task_id": task_id, "yaml_content": yaml_content, "status": "completed", "quality": quality}
         except Exception:
             logger.exception("fast_run failed")
             return {"task_id": task_id, "yaml_content": "", "status": "failed"}
 
-    def _llm_write_scenes(self, novel_text: str, events: list, characters: list) -> list[dict]:
+    def _llm_write_scenes(self, novel_text: str, events: list, characters: list, must_preserve: str = "") -> list[dict]:
         """Have LLM write proper screenplay scenes from narrative events."""
         import json as _json
         events_str = _json.dumps(events[:10], ensure_ascii=False)
         chars_str = _json.dumps([{"id": c.get("id", ""), "name": c.get("name", "")} for c in characters[:10] if isinstance(c, dict)], ensure_ascii=False)
 
-        prompt = f"""Write complete screenplay scenes based on these events and characters.
+        preserve_hint = f"\n\nMUST PRESERVE these key elements from the original text:\n{must_preserve}\n" if must_preserve else ""
+        prompt = f"""Write complete screenplay scenes based on these events and characters.{preserve_hint}
 For EACH event, write a vivid scene with:
 - scene_id: "sc_001", "sc_002", etc.
 - location: EXACT specific location from the text (NEVER "Unknown")
@@ -97,6 +112,7 @@ For EACH event, write a vivid scene with:
 - beats: at least 3 beats per scene, mixing dialogue/action/reaction types
   - Each dialogue beat MUST have a character_id matching the characters list
   - Each beat MUST have an emotion (e.g. "tension", "fear", "anger", "hope", "sadness", "joy", "neutral")
+  - Optional "source" field: brief quote from the original text as evidence
   - Write specific, vivid beat content — not generic summaries
 
 Events: {events_str}
@@ -140,17 +156,40 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
     def run(self, novel_text: str, mode: str = "auto") -> dict[str, Any]:
         task_id = f"task_{uuid.uuid4().hex[:12]}"
         self._init_semantic_memory(novel_text)
+
+        # Step 0: Key point detection for skeleton validation
+        from backend.core.preprocessor import detect_key_points, detect_language
+        key_points = detect_key_points(novel_text)
+        must_preserve = key_points["must_preserve"]
+        lang = detect_language(novel_text)
+
         try:
-            narrative = self._narrative.retry({"novel_text": novel_text})
-            character_result = self._character.retry({"novel_text": novel_text})
+            narrative = self._narrative.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
+            character_result = self._character.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
             char_list = character_result.get("characters", []) if isinstance(character_result, dict) else []
 
             world_result = self._world.run({"novel_text": novel_text})
             _timeline = self._timeline.run({"novel_text": novel_text})
 
+            # Step 1: Skeleton — episode + scene outlines
             ep_plan = self._episode_planner.run({"novel_text": novel_text, "characters": char_list})
             episodes_data = ep_plan.get("episodes", [])
 
+            # Step 2: Skeleton validation — check key events covered
+            skeleton_yaml = yaml.dump(episodes_data[:3], allow_unicode=True) if episodes_data else ""
+            if skeleton_yaml and must_preserve:
+                critic_input = {
+                    "yaml_content": skeleton_yaml,
+                    "fast": True,
+                    "must_preserve": must_preserve,
+                }
+                critic_result = self._critic.run(critic_input)
+                if critic_result.get("score", 100) < 50 and len(episodes_data) < 5:
+                    logger.info("Skeleton validation score low (%.0f), retrying episode planning", critic_result.get("score", 0))
+                    ep_plan = self._episode_planner.run({"novel_text": novel_text, "characters": char_list, "must_preserve": must_preserve})
+                    episodes_data = ep_plan.get("episodes", [])
+
+            # Step 3: Detail — scene planning + dialogue writing
             assembled: list[dict[str, Any]] = []
             for ep in episodes_data:
                 if not isinstance(ep, dict):
@@ -183,7 +222,7 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                 "world": world_result,
                 "episodes": assembled,
             })
-            yaml_content = screenplay_to_yaml(screenplay)
+            yaml_content = screenplay_to_yaml(screenplay, lang)
 
             critic = self._critic.run({"yaml_content": yaml_content})
             violations = critic.get("violations", [])
@@ -238,14 +277,10 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
             if not isinstance(c, dict):
                 continue
             role = c.get("role", "supporting")
-            try:
-                role_enum = CharacterRole(role)
-            except ValueError:
-                role_enum = CharacterRole.SUPPORTING
             characters.append(Character(
                 id=c.get("id", f"char_{(i+1):03d}"),
                 name=c.get("name", ""),
-                role=role_enum,
+                role=role,
                 goal=c.get("goal", ""),
                 fear=c.get("fear", ""),
                 arc=c.get("arc", ""),
@@ -302,6 +337,7 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                         character_id=b.get("character_id"),
                         content=b.get("content", ""),
                         emotion=b.get("emotion"),
+                        source=b.get("source", ""),
                     ))
                 if not beats:
                     beats = [Beat(type=BeatType.ACTION, content=f"Scene at {sc.get('location', 'unknown')}", emotion=None)]

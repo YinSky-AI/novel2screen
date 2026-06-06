@@ -418,6 +418,7 @@ async function pollTask() {
       state.yamlContent = data.yaml_content || data.output || '';
       showStep(3);
       renderYaml(state.yamlContent);
+      renderQuality(data.quality || data.quality_report || {});
       showToast(t('toastConverted'), 'success');
     } else if (data.status === 'failed' || data.status === 'error') {
       stopPolling();
@@ -770,6 +771,35 @@ function showToast(msg, type) {
     toast.style.transition = 'all 0.3s ease';
     setTimeout(() => toast.remove(), 300);
   }, 4000);
+}
+
+/* ===== Quality Assessment ===== */
+function renderQuality(quality) {
+  const panel = document.getElementById('quality-panel');
+  const stats = document.getElementById('quality-stats');
+  if (!panel || !stats) return;
+  if (!quality || !quality.valid_yaml) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+
+  const emo = Math.round((1 - quality.emotion_null_rate) * 100);
+  const cid = Math.round((1 - quality.char_id_null_rate) * 100);
+  const dur = Math.round((1 - quality.duration_diversity) * 100);
+  const beats = quality.beat_count || 0;
+  const scenes = quality.scene_count || 0;
+  const issues = quality.issues || [];
+
+  const grade = (v) => v >= 90 ? 'good' : v >= 60 ? 'warn' : 'bad';
+
+  stats.innerHTML = `
+    <div class="q-stat ${grade(emo)}"><span class="q-val">${emo}%</span><span class="q-label">Emotion</span></div>
+    <div class="q-stat ${grade(cid)}"><span class="q-val">${cid}%</span><span class="q-label">Char ID</span></div>
+    <div class="q-stat ${grade(dur)}"><span class="q-val">${dur}%</span><span class="q-label">Variety</span></div>
+    <div class="q-stat"><span class="q-val">${beats}</span><span class="q-label">Beats</span></div>
+    <div class="q-stat"><span class="q-val">${scenes}</span><span class="q-label">Scenes</span></div>
+  ` + (issues.length > 0 ? `<div class="q-issues">${issues.filter(i => !i.includes('No quality issues')).map(i => '<span>' + escapeHtml(i) + '</span>').join('')}</div>` : '');
 }
 
 /* ===== Utilities ===== */

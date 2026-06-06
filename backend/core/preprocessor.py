@@ -289,6 +289,170 @@ def extract_named_entities(text: str) -> dict[str, list[str]]:
     return result
 
 
+def detect_key_points(text: str) -> dict[str, Any]:
+    """Extract critical structural hints for guiding LLM generation.
+
+    Returns a dict with:
+      - dialogues: first 10 quoted dialogue sentences found
+      - time_location_pairs: regex matches of time+location patterns
+      - first_chars: first 200 chars of text
+      - last_chars: last 200 chars of text
+      - ending_sentences: last 3 sentences (split by 。.!?！？)
+      - frequent_locations: top 5 location-like nouns
+      - must_preserve: combined "checklist" string for prompt injection
+    """
+    result: dict[str, Any] = {
+        "dialogues": [],
+        "time_location_pairs": [],
+        "first_chars": text[:200].strip(),
+        "last_chars": text[-200:].strip(),
+        "ending_sentences": [],
+        "frequent_locations": [],
+        "must_preserve": "",
+    }
+
+    # 1. Extract dialogue sentences
+    dialogue_pattern = re.compile(r'[""]([^""]+)[""]|\u201c([^\u201d]+)\u201d|"([^"]+)"')
+    dialogues = []
+    for m in dialogue_pattern.finditer(text):
+        content = m.group(1) or m.group(2) or m.group(3)
+        if content and len(content) > 3:
+            dialogues.append(content.strip())
+            if len(dialogues) >= 10:
+                break
+    result["dialogues"] = dialogues
+
+    # 2. Time + location pairs
+    time_words = ["夜", "白天", "清晨", "傍晚", "凌晨", "晚上", "傍晚", "三天后", "一周后", "第二天", "次日",
+                  "night", "morning", "evening", "dawn", "dusk", "afternoon", "later", "next day"]
+    loc_suffix = ["里", "内", "中", "外", "边", "上", "下", "楼", "室", "房间", "工作间", "厨房", "机房", "平台"]
+    pairs = []
+    for tw in time_words:
+        pattern = re.compile(rf"{re.escape(tw)}.*?([\u4e00-\u9fff]{{2,10}}(?:{'|'.join(re.escape(s) for s in loc_suffix)}))")
+        for m in pattern.finditer(text):
+            pairs.append({"time": tw, "location": m.group(1)})
+            if len(pairs) >= 8:
+                break
+    result["time_location_pairs"] = pairs
+
+    # 3. Ending sentences
+    sentences = re.split(r"[。！？.!?\n]", text)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 5]
+    result["ending_sentences"] = sentences[-3:] if len(sentences) >= 3 else sentences
+
+    # 4. Build "must preserve" checklist
+    parts = []
+    parts.append(f"文本开头: {result['first_chars'][:100]}")
+    parts.append(f"文本结尾: {result['last_chars'][:100]}")
+    if dialogues:
+        parts.append(f"关键对话: {'; '.join(dialogues[:5])}")
+    if result["ending_sentences"]:
+        parts.append(f"结尾: {result['ending_sentences'][-1]}")
+    result["must_preserve"] = "\n".join(parts)
+
+    return result
+
+
+def evaluate_yaml_quality(yaml_content: str) -> dict[str, Any]:
+    """Auto-evaluate generated screenplay YAML quality without reference text.
+
+    Returns:
+      - valid_yaml: whether YAML can be parsed
+      - emotion_null_rate: fraction of beats with emotion=null
+      - char_id_null_rate: fraction of dialogue beats missing character_id
+      - duration_diversity: Gini-like score (1.0 = all same, 0.0 = varied)
+      - scene_count: total scenes
+      - beat_count: total beats
+      - issues: list of human-readable issue descriptions
+    """
+    import yaml
+    from collections import Counter
+
+    issues: list[str] = []
+    result: dict[str, Any] = {
+        "valid_yaml": False,
+        "emotion_null_rate": 1.0,
+        "char_id_null_rate": 1.0,
+        "duration_diversity": 1.0,
+        "scene_count": 0,
+        "beat_count": 0,
+        "issues": issues,
+    }
+
+    try:
+        data = yaml.safe_load(yaml_content)
+        result["valid_yaml"] = True
+    except Exception as e:
+        issues.append(f"YAML parse error: {e}")
+        return result
+
+    if not isinstance(data, dict):
+        issues.append("YAML root is not a dict")
+        return result
+
+    # Count beats, emotions, character_ids
+    total_beats = 0
+    null_emotions = 0
+    null_char_ids = 0
+    dialogue_beats = 0
+    durations: list[int] = []
+
+    episodes = data.get("episodes", [])
+    if not isinstance(episodes, list):
+        episodes = []
+    result["scene_count"] = sum(len(ep.get("scenes", [])) if isinstance(ep, dict) else 0 for ep in episodes)
+
+    for ep in episodes:
+        if not isinstance(ep, dict):
+            continue
+        for sc in ep.get("scenes", []) or []:
+            if not isinstance(sc, dict):
+                continue
+            dur = sc.get("duration_estimate", "")
+            if isinstance(dur, str):
+                dnum = re.sub(r"[^0-9]", "", dur)
+                if dnum:
+                    durations.append(int(dnum))
+            for b in sc.get("beats", []) or []:
+                if not isinstance(b, dict):
+                    continue
+                total_beats += 1
+                if b.get("emotion") in (None, "", "null"):
+                    null_emotions += 1
+                if b.get("type") == "dialogue":
+                    dialogue_beats += 1
+                    if b.get("character_id") in (None, "", "null"):
+                        null_char_ids += 1
+
+    result["beat_count"] = total_beats
+
+    if total_beats > 0:
+        result["emotion_null_rate"] = round(null_emotions / total_beats, 3)
+    if dialogue_beats > 0:
+        result["char_id_null_rate"] = round(null_char_ids / dialogue_beats, 3)
+
+    if total_beats <= 3:
+        issues.append(f"Only {total_beats} beats total — scenes may be too condensed")
+
+    if result["emotion_null_rate"] > 0.5:
+        issues.append(f"Emotion missing in {result['emotion_null_rate']:.0%} of beats")
+    if dialogue_beats > 0 and result["char_id_null_rate"] > 0.5:
+        issues.append(f"character_id missing in {result['char_id_null_rate']:.0%} of dialogue beats")
+
+    # Duration diversity
+    dur_counter = Counter(str(d) for d in durations)
+    if dur_counter and len(durations) > 1:
+        total = sum(dur_counter.values())
+        result["duration_diversity"] = round(sum((v / total) ** 2 for v in dur_counter.values()), 3)
+        if result["duration_diversity"] > 0.9:
+            issues.append("All scenes have nearly identical durations — should vary by complexity")
+
+    if not issues:
+        issues.append("No quality issues detected")
+
+    return result
+
+
 def _get_demo_preprocess_data() -> dict[str, Any]:
     return {
         "narrative_summary": _DEMO_NARRATIVE,

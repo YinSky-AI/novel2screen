@@ -14,6 +14,7 @@ Output ONLY valid JSON, no markdown, no explanation."""
 class NarrativeAgent(AgentBase):
     def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
         novel_text: str = input_data.get("novel_text", "")
+        must_preserve: str = input_data.get("must_preserve", "")
         query = novel_text[:3000]
 
         base_prompt = f"""Analyze the following novel excerpt. Output valid JSON with these fields:
@@ -28,15 +29,17 @@ class NarrativeAgent(AgentBase):
    - "location": EXACT location name from the text (e.g. "改装集装箱工作间", "server room B4"). NEVER use "Unknown".
    - "time": specific time from text (e.g. "Night", "Dawn", "Afternoon", "凌晨"). NEVER just "Day".
    - "characters_involved": list of character names present
-   - "emotion": dominant emotion (e.g. "tension", "fear", "hope", "sadness", "anger")
-   - "visual_focus": what the camera would see (e.g. "flickering LEDs", "steam rising from noodles")
-   - "sound_effect": ambient or specific sounds (e.g. "distant hum", "keyboard clicking")
+    - "emotion": dominant emotion (e.g. "tension", "fear", "hope", "sadness", "anger")
+    - "visual_focus": what the camera would see (e.g. "flickering LEDs", "steam rising from noodles")
+    - "sound_effect": ambient or specific sounds (e.g. "distant hum", "keyboard clicking")
+    - "source": brief quote or reference from the original text as evidence
 6. "subplots": Array of strings describing secondary storylines
 
 CONSTRAINTS:
 - Extract ONLY from the text. Do NOT invent anything.
 - location and time MUST be specific — never generic like "Unknown" or "Day".
 - visual_focus and sound_effect help build cinematic atmosphere.
+{"" if not must_preserve else f"\nMUST-PRESERVE elements from original text — ensure these are reflected:\n{must_preserve}\n"}
 
 Novel excerpt:
 {novel_text[:5000]}

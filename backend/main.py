@@ -134,6 +134,7 @@ async def get_task_status(task_id: str) -> TaskStatus:
         current_stage=td.get("current_stage", ""),
         output=td.get("output", ""),
         error=td.get("error", ""),
+        quality=td.get("quality", {}),
     )
 
 
@@ -348,7 +349,7 @@ async def _run_generation(task_id: str, novel_text: str, mode: str, pipeline: st
         status = result.get("status", "completed")
         yaml_content = result.get("yaml_content", "")
         if task_id in _task_store:
-            _task_store[task_id].update({"status": status, "progress": 100.0, "current_stage": "Complete" if status == "completed" else "Failed", "output": yaml_content, "yaml_content": yaml_content})
+            _task_store[task_id].update({"status": status, "progress": 100.0, "current_stage": "Complete" if status == "completed" else "Failed", "output": yaml_content, "yaml_content": yaml_content, "quality": result.get("quality", {})})
     except Exception as e:
         logger.exception("_run_generation failed")
         if task_id in _task_store:

@@ -37,6 +37,7 @@ Output an array of beats. Each beat should be:
 - character_id: char_XXX format (for dialogue/reaction beats)
 - content: The dialogue text or action description
 - emotion: Emotional tone of the beat
+- source: Optional brief quote/line reference from the original text as evidence
 
 Example beat:
 {{"type": "dialogue", "character_id": "char_001", "content": "I never asked for this power.", "emotion": "regret"}}

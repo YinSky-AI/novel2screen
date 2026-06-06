@@ -9,26 +9,31 @@ class CriticAgent(AgentBase):
     def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
         yaml_content: str = input_data.get("yaml_content", "")
         original_text: str = input_data.get("original_text", "")
+        must_preserve: str = input_data.get("must_preserve", "")
+        fast: bool = input_data.get("fast", False)
         characters: list[dict[str, Any]] = input_data.get("characters", [])
 
         query = yaml_content[:3000]
         system_prompt = "You are a screenplay quality critic. Output valid JSON only."
-
         char_names = [c.get("name", "?") for c in characters]
+
+        # Build must-preserve checklist if provided (for skeleton validation)
+        preserve_check = ""
+        if must_preserve:
+            preserve_check = f"""\n\nMUST-PRESERVE CHECKLIST — verify EACH of these items appears in the screenplay:
+{must_preserve}
+
+For each missing item, add an issue with severity "critical". If all are present, note this in the assessment."""
 
         base_prompt = f"""Review the following screenplay YAML and provide a quality assessment.
 
-Score each category 0-10 and identify issues:
-
-1. **score**: Overall quality score (0-10)
+Score the screenplay 0-100 (100 = flawless):
+1. **score**: Overall quality score (0-100)
 2. **issues**: Array of objects with:
    - severity: "critical", "major", "minor"
-   - category: e.g. "structure", "dialogue", "character", "pacing", "consistency"
+   - category: e.g. "structure", "dialogue", "character", "pacing", "consistency", "missing_key_point"
    - description: What's wrong
-   - location: Scene/episode reference
-   - suggestion: How to fix
-3. **suggestions**: Array of actionable improvement suggestions
-4. **overall_assessment**: A paragraph summarizing overall quality
+3. **summary**: Brief quality summary{preserve_check}
 
 Characters: {', '.join(char_names) if char_names else 'Not provided'}
 Original text snippet: {original_text[:2000]}

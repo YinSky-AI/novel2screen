@@ -5,7 +5,19 @@ import yaml
 from backend.schemas.models import Beat, BeatType, Character, CharacterRole, Episode, Scene, Screenplay, Transition, ValidationReport
 
 
-def screenplay_to_yaml(screenplay: Screenplay) -> str:
+def screenplay_to_yaml(screenplay: Screenplay, language: str = "") -> str:
+    role_map = {
+        CharacterRole.PROTAGONIST: "protagonist",
+        CharacterRole.ANTAGONIST: "antagonist",
+        CharacterRole.SUPPORTING: "supporting",
+    }
+    if language in ("chinese", "mixed"):
+        role_map = {
+            CharacterRole.PROTAGONIST: "主角",
+            CharacterRole.ANTAGONIST: "反派",
+            CharacterRole.SUPPORTING: "配角",
+        }
+
     data = {
         "title": screenplay.title,
         "logline": screenplay.logline,
@@ -15,7 +27,7 @@ def screenplay_to_yaml(screenplay: Screenplay) -> str:
             {
                 "id": c.id,
                 "name": c.name,
-                "role": c.role.value,
+                "role": role_map.get(c.role, c.role.value),
                 "goal": c.goal,
                 "fear": c.fear,
                 "arc": c.arc,

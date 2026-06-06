@@ -36,12 +36,32 @@ class Character(BaseModel):
     arc: str
     voice_style: str = ""
 
+    @field_validator("role", mode="before")
+    @classmethod
+    def _normalize_role(cls, v: Any) -> CharacterRole:
+        if isinstance(v, CharacterRole):
+            return v
+        role_map = {
+            "主角": CharacterRole.PROTAGONIST,
+            "主人公": CharacterRole.PROTAGONIST,
+            "protagonist": CharacterRole.PROTAGONIST,
+            "反派": CharacterRole.ANTAGONIST,
+            "敌人": CharacterRole.ANTAGONIST,
+            "antagonist": CharacterRole.ANTAGONIST,
+            "配角": CharacterRole.SUPPORTING,
+            "支持角色": CharacterRole.SUPPORTING,
+            "其他": CharacterRole.SUPPORTING,
+            "supporting": CharacterRole.SUPPORTING,
+        }
+        return role_map.get(str(v).lower(), CharacterRole.SUPPORTING)
+
 
 class Beat(BaseModel):
     type: BeatType
     character_id: str | None = None
     content: str
     emotion: str | None = None
+    source: str = ""
 
 
 class Scene(BaseModel):
@@ -160,6 +180,7 @@ class TaskStatus(BaseModel):
     current_stage: str = ""
     output: str = ""
     error: str = ""
+    quality: dict[str, Any] = Field(default_factory=dict)
 
 
 class UploadResponse(BaseModel):

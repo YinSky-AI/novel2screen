@@ -6,33 +6,37 @@ from backend.agents.base import AgentBase
 
 SYSTEM_PROMPT = """You are a character analyst. Extract ALL characters from the novel text.
 IMPORTANT: Only include characters explicitly named in the text. Do NOT fabricate any characters.
-For each character provide: id (char_001 format), name, role (protagonist/antagonist/supporting), goal, fear, arc, voice_style.
-Respond in the same language as the input text.
-Output ONLY valid JSON with a "characters" array."""
+Output ONLY valid JSON with a "characters" array.
+Respond in the same language as the input text."""
 
 
 class CharacterAgent(AgentBase):
     def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
         novel_text: str = input_data.get("novel_text", "")
-        language: str = input_data.get("language", "auto")
-        existing_characters: list[dict[str, Any]] = input_data.get("existing_characters", [])
+        must_preserve: str = input_data.get("must_preserve", "")
+
+        # Detect language to use appropriate role labels
+        lang = input_data.get("language", "")
+        if not lang:
+            from backend.core.preprocessor import detect_language
+            lang = detect_language(novel_text)
+        is_zh = lang in ("chinese", "mixed")
+
+        role_options = "主角/反派/配角" if is_zh else "protagonist/antagonist/supporting"
+        role_desc = "角色类型 (主角=protagonist, 反派=antagonist, 配角=supporting)" if is_zh else "Character role (protagonist, antagonist, or supporting)"
 
         query = novel_text[:3000]
-        characters_hint = ""
-        if existing_characters:
-            characters_hint = f"\n\nExisting characters to expand upon:\n{existing_characters}"
+        preserve_hint = f"\n\nMUST-PRESERVE: {must_preserve}\n" if must_preserve else ""
 
         base_prompt = f"""Analyze the following novel excerpt and identify all characters. For each character, provide:
-
-- id: Use format char_001, char_002, etc. Start counting from {(len(existing_characters) + 1):03d}
+- id: Use format char_001, char_002, etc.
 - name: Character's full name
-- role: One of "protagonist", "antagonist", "supporting"
+- role: {role_desc}
 - goal: What the character wants
 - fear: What the character is afraid of (empty string if unknown)
 - arc: The character's development journey
 - voice_style: How they speak (e.g. formal, casual, sarcastic, terse)
-{characters_hint}
-
+{preserve_hint}
 Novel excerpt:
 {novel_text[:5000]}
 
