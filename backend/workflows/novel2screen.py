@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -13,12 +14,10 @@ from backend.agents.repair import RepairAgent
 from backend.agents.scene_planner import ScenePlannerAgent
 from backend.agents.timeline import TimelineAgent
 from backend.agents.world import WorldAgent
-from backend.core.memory import MemoryManager
-from backend.core.preprocessor import smart_chunk
-from backend.harness.novel_reader import NovelReader
-from backend.harness.orchestrator import PipelineOrchestrator, PipelineState, build_fast_pipeline, build_full_pipeline, state_to_response
-from backend.schemas.models import ConvertResponse, ConvertRequest, Screenplay, TaskStatus
+from backend.schemas.models import Screenplay
 from backend.schemas.validator import screenplay_to_yaml, validate_screenplay_yaml, yaml_to_screenplay
+
+logger = logging.getLogger(__name__)
 
 
 class Novel2ScreenWorkflow:
