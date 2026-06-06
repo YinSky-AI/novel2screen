@@ -7,7 +7,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -74,22 +74,24 @@ async def root() -> dict[str, str]:
 
 
 @app.post("/novels/upload", response_model=UploadResponse)
-async def upload_novel(request: NovelUploadRequest) -> UploadResponse:
+async def upload_novel(file: UploadFile = File(...)) -> UploadResponse:
+    content = await file.read()
+    novel_text = content.decode("utf-8")
     task_id = f"task_{uuid.uuid4().hex[:12]}"
-    language = detect_language(request.content)
+    language = detect_language(novel_text)
     _task_store[task_id] = {
         "status": "uploaded",
         "progress": 0.0,
         "current_stage": "File uploaded",
         "output": "",
-        "novel_text": request.content,
-        "filename": request.filename,
+        "novel_text": novel_text,
+        "filename": file.filename or "unknown",
         "language": language,
     }
     return UploadResponse(
         task_id=task_id,
-        filename=request.filename,
-        char_count=len(request.content),
+        filename=file.filename or "unknown",
+        char_count=len(novel_text),
         language=language,
     )
 
