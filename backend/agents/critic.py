@@ -1,50 +1,64 @@
-"""CriticAgent - Reviews screenplay quality and consistency."""
-import json
+from __future__ import annotations
 
-from ..core.llm import llm_client
-from ..core.prompts import CRITIC_SYSTEM, CRITIC_USER
-from ..schemas.models import CriticOutput
-from .base import AgentBase
+from typing import Any
+
+from backend.agents.base import AgentBase
 
 
 class CriticAgent(AgentBase):
-    """Evaluates screenplay for continuity, pacing, character motivation, etc."""
+    def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        yaml_content: str = input_data.get("yaml_content", "")
+        original_text: str = input_data.get("original_text", "")
+        characters: list[dict[str, Any]] = input_data.get("characters", [])
 
-    def __init__(self, model: str = "gpt-4o-mini"):
-        super().__init__(name="CriticAgent", model=model)
+        query = yaml_content[:3000]
+        system_prompt = "You are a screenplay quality critic. Output valid JSON only."
 
-    def run(self, input_data: dict) -> dict:
-        response = llm_client.complete(
-            system_prompt=CRITIC_SYSTEM,
-            user_prompt=CRITIC_USER.format(
-                screenplay=input_data.get("screenplay", ""),
-            ),
-            model=self.model,
-            temperature=0.2,
-        )
-        return self._parse_response(response)
+        char_names = [c.get("name", "?") for c in characters]
 
+        base_prompt = f"""Review the following screenplay YAML and provide a quality assessment.
 
-    def _parse_response(self, text: str) -> dict:
-        import re
-        text = text.strip()
-        text = re.sub(r"`(?:json)?\s*", "", text)
-        text = re.sub(r"\s*`", "", text)
-        text = text.strip()
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-            raise
+Score each category 0-10 and identify issues:
 
-    def validate(self, output: dict) -> bool:
-        try:
-            CriticOutput(**output)
-            return True
-        except Exception:
-            return False
+1. **score**: Overall quality score (0-10)
+2. **issues**: Array of objects with:
+   - severity: "critical", "major", "minor"
+   - category: e.g. "structure", "dialogue", "character", "pacing", "consistency"
+   - description: What's wrong
+   - location: Scene/episode reference
+   - suggestion: How to fix
+3. **suggestions**: Array of actionable improvement suggestions
+4. **overall_assessment**: A paragraph summarizing overall quality
 
-    def get_quality_score(self, output: dict) -> float:
-        return output.get("score", 1.0)
+Characters: {', '.join(char_names) if char_names else 'Not provided'}
+Original text snippet: {original_text[:2000]}
+
+Screenplay YAML:
+{yaml_content[:8000]}
+
+Output ONLY a JSON object. No markdown, no explanation."""
+
+        prompt = self._build_rag_prompt(base_prompt, query)
+
+        if self._retry_errors:
+            prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
+
+        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.4)
+        return self._parse_json(response)
+
+    def validate(self, output: dict[str, Any]) -> bool:
+        has_score = "score" in output and isinstance(output["score"], (int, float))
+        has_issues = isinstance(output.get("issues"), list)
+        return has_score and has_issues
+
+    def validate_with_errors(self, output: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        if "score" not in output:
+            errors.append("Missing score field")
+        elif not isinstance(output["score"], (int, float)):
+            errors.append("score must be a number")
+        if not isinstance(output.get("issues"), list):
+            errors.append("issues must be a list")
+        if not output.get("overall_assessment"):
+            errors.append("overall_assessment is missing")
+        return errors

@@ -1,36 +1,22 @@
-﻿version: '3.9'
 services:
   backend:
     build: ./backend
     ports:
-      - '8000:8000'
-    env_file: .env
+      - "8000:8000"
     environment:
-      - MODE_DEFAULT=long
-
-  frontend:
-    build: ./frontend
-    ports:
-      - '3000:80'
-    depends_on:
-      - backend
-
-  postgres:
-    image: postgres:15
-    environment:
-      - POSTGRES_DB=novel2screen
-      - POSTGRES_USER=app
-      - POSTGRES_PASSWORD=changeme
+      - DATABASE_URL=sqlite:///./data/novel2screen.db
     volumes:
-      - pgdata:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7
-
-  qdrant:
-    image: qdrant/qdrant
+      - ./data:/app/data
+  frontend:
+    image: nginx:alpine
     ports:
-      - '6333:6333'
-
-volumes:
-  pgdata:
+      - "3000:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./data/chroma:/chroma/chroma

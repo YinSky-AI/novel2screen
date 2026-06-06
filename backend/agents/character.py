@@ -1,50 +1,67 @@
-"""CharacterAgent - Extracts character profiles from novel content."""
-import json
+from __future__ import annotations
 
-from ..core.llm import llm_client
-from ..core.prompts import CHARACTER_SYSTEM, CHARACTER_USER
-from ..schemas.models import CharacterOutput
-from .base import AgentBase
+from typing import Any
+
+from backend.agents.base import AgentBase
 
 
 class CharacterAgent(AgentBase):
-    """Extracts character profiles including goals, fears, arcs, and voice styles."""
+    def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        novel_text: str = input_data.get("novel_text", "")
+        language: str = input_data.get("language", "auto")
+        existing_characters: list[dict[str, Any]] = input_data.get("existing_characters", [])
 
-    def __init__(self, model: str = "gpt-4o-mini"):
-        super().__init__(name="CharacterAgent", model=model)
+        query = novel_text[:3000]
+        system_prompt = "You are a character analyst for screenplays. Output valid JSON only."
+        characters_hint = ""
+        if existing_characters:
+            characters_hint = f"\n\nExisting characters to expand upon:\n{existing_characters}"
 
-    def run(self, input_data: dict) -> dict:
-        content = input_data.get("content", "")
-        if not content:
-            content = "\n\n".join(input_data.get("chunks", []))
+        base_prompt = f"""Analyze the following novel excerpt and identify all characters. For each character, provide:
 
-        response = llm_client.complete(
-            system_prompt=CHARACTER_SYSTEM,
-            user_prompt=CHARACTER_USER.format(content=content),
-            model=self.model,
-            temperature=0.2,
-        )
+- id: Use format char_001, char_002, etc. Start counting from {(len(existing_characters) + 1):03d}
+- name: Character's full name
+- role: One of "protagonist", "antagonist", "supporting"
+- goal: What the character wants
+- fear: What the character is afraid of (empty string if unknown)
+- arc: The character's development journey
+- voice_style: How they speak (e.g. formal, casual, sarcastic, terse)
+{characters_hint}
 
-        return self._parse_response(response)
+Novel excerpt:
+{novel_text[:5000]}
 
+Output ONLY a JSON object with field "characters" containing an array. No markdown, no explanation."""
 
-    def _parse_response(self, text: str) -> dict:
-        import re
-        text = text.strip()
-        text = re.sub(r"`(?:json)?\s*", "", text)
-        text = re.sub(r"\s*`", "", text)
-        text = text.strip()
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-            raise
+        prompt = self._build_rag_prompt(base_prompt, query)
 
-    def validate(self, output: dict) -> bool:
-        try:
-            CharacterOutput(**output)
-            return len(output.get("characters", [])) >= 1
-        except Exception:
+        if self._retry_errors:
+            prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
+
+        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.5)
+        return self._parse_json(response)
+
+    def validate(self, output: dict[str, Any]) -> bool:
+        characters = output.get("characters", [])
+        if not isinstance(characters, list) or not characters:
             return False
+        for c in characters:
+            if not all(k in c for k in ["id", "name", "role", "goal", "arc"]):
+                return False
+        return True
+
+    def validate_with_errors(self, output: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        characters = output.get("characters", [])
+        if not isinstance(characters, list):
+            errors.append("characters must be a list")
+        elif not characters:
+            errors.append("No characters extracted")
+        else:
+            for i, c in enumerate(characters):
+                for field in ["id", "name", "role", "goal", "arc"]:
+                    if field not in c or not c[field]:
+                        errors.append(f"Character {i} missing field: {field}")
+                if "id" in c and not c["id"].startswith("char_"):
+                    errors.append(f"Character {i} has invalid id format: {c['id']}")
+        return errors

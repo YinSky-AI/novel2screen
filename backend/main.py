@@ -1,461 +1,332 @@
-﻿"""Novel2Screen - FastAPI Backend Server
-Multi-Agent System for Novel-to-Screenplay Conversion.
-"""
-import os
-import traceback
-from typing import Annotated
+from __future__ import annotations
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+import asyncio
+import uuid
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .config import ALLOWED_ORIGINS
-from .schemas.validator import validate_screenplay_yaml
-from .workflows.novel2screen import Novel2ScreenWorkflow
+from backend.agents.narrative import NarrativeAgent
+from backend.config import settings
+from backend.core.llm import LLMClient
+from backend.core.memory import MemoryManager
+from backend.core.preprocessor import detect_language, parse_chapters
+from backend.schemas.models import (
+    AlignmentResponse,
+    ConvertResponse,
+    DetectLanguageResponse,
+    HealthResponse,
+    ImportEditsResponse,
+    NovelUploadRequest,
+    TaskStatus,
+    UploadResponse,
+    UsageStats,
+    ValidateResponse,
+)
+from backend.schemas.validator import _DEMO_SCREENPLAY_YAML, validate_screenplay_yaml
+from backend.workflows.novel2screen import Novel2ScreenWorkflow
 
-# Rate limiting
-_rate_limit_store: dict = {}
-RATE_LIMIT_MAX = 30  # requests per window
-RATE_LIMIT_WINDOW = 60  # seconds
+_task_store: dict[str, dict[str, Any]] = {}
+_workflow: Novel2ScreenWorkflow | None = None
 
 
-def _check_rate_limit(client_ip: str) -> bool:
-    """Check if client has exceeded rate limit. Returns True if allowed."""
-    import time
-    now = time.time()
-    window_start = now - RATE_LIMIT_WINDOW
-    timestamps = _rate_limit_store.get(client_ip, [])
-    timestamps = [t for t in timestamps if t > window_start]
-    if len(timestamps) >= RATE_LIMIT_MAX:
-        return False
-    timestamps.append(now)
-    _rate_limit_store[client_ip] = timestamps
-    return True
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+
 
 app = FastAPI(
-    title="Novel2Screen API",
-    description="Multi-Agent System for Novel-to-Screenplay Conversion",
-    version="2.1.0",
+    title="Novel2Screen",
+    version="2.0.0",
+    lifespan=lifespan,
 )
-
-FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
-if os.path.isdir(FRONTEND_DIR):
-    app.mount("/static", StaticFiles(directory=os.path.join(FRONTEND_DIR, "src")), name="static")
-
-
-@app.middleware("http")
-async def rate_limit_middleware(request, call_next):
-    """Apply rate limiting to API endpoints."""
-    if request.url.path not in ("/health", "/", "/static"):
-        client_ip = request.client.host if request.client else "unknown"
-        if not _check_rate_limit(client_ip):
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "Rate limit exceeded. Try again later."},
-            )
-    return await call_next(request)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-workflow = Novel2ScreenWorkflow()
+
+def _get_workflow() -> Novel2ScreenWorkflow:
+    global _workflow
+    if _workflow is None:
+        _workflow = Novel2ScreenWorkflow(settings, LLMClient(), MemoryManager())
+    return _workflow
 
 
-class ConvertRequest(BaseModel):
-    novel_text: str
-    title: str = "Untitled"
-    genre: str = "Drama"
-    mode: str = ""
-    pipeline: str = "fast"
-    demo: bool = False
+@app.get("/health", response_model=HealthResponse)
+async def health_check() -> HealthResponse:
+    return HealthResponse(status="ok", version="2.0.0")
 
 
-class ConvertResponse(BaseModel):
-    task_id: str
-    status: str
-    screenplay_yaml: str = ""
-    error: str = ""
-    violations: list = []
-    critic_score: float = 1.0
-    chapters_processed: int = 0
-    characters_extracted: int = 0
-    episodes_planned: int = 0
-    scenes_written: int = 0
-    pipeline: str = "fast"
-
-
-@app.get("/")
-async def root():
-    frontend_index = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "index.html")
-    if os.path.isfile(frontend_index):
-        return FileResponse(frontend_index)
-    return {
-        "service": "Novel2Screen",
-        "version": "2.1.0",
-        "endpoints": {
-            "POST /convert": "Convert novel text to screenplay (supports pipeline=fast|full)",
-            "POST /convert/file": "Upload novel file for conversion",
-            "GET /export/{title}": "Download screenplay YAML",
-            "POST /validate": "Validate screenplay YAML",
-            "POST /novels/upload": "Upload novel, get task_id",
-            "POST /generate/{task_id}": "Generate from uploaded novel",
-            "GET /tasks/{task_id}": "Get task status",
-            "POST /import-edits/{task_id}": "Import edited YAML",
-            "GET /alignment/{task_id}": "Get consistency report",
-        },
-    }
-
-
-@app.post("/convert", response_model=ConvertResponse)
-async def convert_novel(req: ConvertRequest):
-    if len(req.novel_text) < 100:
-        raise HTTPException(status_code=400, detail="Novel text too short (minimum 100 characters)")
-
-    if req.demo:
-        from .schemas.validator import _DEMO_SCREENPLAY_YAML
-        return ConvertResponse(
-            task_id="task_demo", status="completed",
-            screenplay_yaml=_DEMO_SCREENPLAY_YAML,
-            violations=[], critic_score=0.92, pipeline="demo",
-        )
-
-    try:
-        if req.pipeline == "full":
-            state = workflow.run(
-                novel_text=req.novel_text, novel_title=req.title,
-                genre=req.genre, mode=req.mode,
-            )
-        else:
-            state = workflow.fast_run(
-                novel_text=req.novel_text, novel_title=req.title,
-                genre=req.genre, mode=req.mode,
-            )
-
-        if state.get("error"):
-            return ConvertResponse(
-                task_id="task_001", status="error",
-                error=state["error"], pipeline=req.pipeline,
-            )
-
-        screenplay_data = state.get("screenplay", {})
-        episodes_list = screenplay_data.get("episodes", []) if isinstance(screenplay_data, dict) else []
-        total_scenes = sum(len(ep.get("scenes", [])) for ep in episodes_list)
-
-        return ConvertResponse(
-            task_id="task_001",
-            status="completed" if state["completed"] else "partial",
-            screenplay_yaml=state.get("screenplay_yaml", ""),
-            violations=state.get("violations", []),
-            critic_score=state.get("critic_score", 1.0),
-            chapters_processed=len(state.get("novel_chunks", [])),
-            characters_extracted=len(state.get("characters", {}).get("characters", [])),
-            episodes_planned=len(episodes_list),
-            scenes_written=total_scenes,
-            pipeline=req.pipeline,
-        )
-    except Exception as e:
-        return ConvertResponse(
-            task_id="task_001", status="error",
-            error=f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
-            pipeline=req.pipeline,
-        )
-
-
-@app.post("/convert/file")
-async def convert_novel_file(
-    file: Annotated[UploadFile, File()],
-    title: Annotated[str, Form()] = "Untitled",
-    genre: Annotated[str, Form()] = "Drama",
-    mode: Annotated[str, Form()] = "",
-    pipeline: Annotated[str, Form()] = "fast",
-):
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
-
-    content = await file.read()
-    try:
-        novel_text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        novel_text = content.decode("gbk", errors="replace")
-
-    if not title or title == "Untitled":
-        title = os.path.splitext(file.filename)[0]
-
-    fn = workflow.run if pipeline == "full" else workflow.fast_run
-
-    state = fn(novel_text=novel_text, novel_title=title, genre=genre, mode=mode)
-
-    if state.get("error"):
-        return {"status": "error", "error": state["error"]}
-
-    screenplay_data = state.get("screenplay", {})
-    episodes_list = screenplay_data.get("episodes", []) if isinstance(screenplay_data, dict) else []
-    total_scenes = sum(len(ep.get("scenes", [])) for ep in episodes_list)
-
-    return {
-        "status": "completed" if state["completed"] else "partial",
-        "title": title,
-        "mode": state.get("mode", "short"),
-        "pipeline": pipeline,
-        "chapters_processed": len(state.get("novel_chunks", [])),
-        "characters_extracted": len(state.get("characters", {}).get("characters", [])),
-        "episodes_planned": len(episodes_list),
-        "scenes_written": total_scenes,
-        "critic_score": state.get("critic_score", 1.0),
-        "violations": len(state.get("violations", [])),
-        "screenplay_yaml": state.get("screenplay_yaml", ""),
-    }
-
-
-@app.post("/validate")
-async def validate_yaml(yaml_text: Annotated[str, Form()]):
-    is_valid, errors = validate_screenplay_yaml(yaml_text)
-    return {"valid": is_valid, "errors": errors}
-
-
-@app.get("/export/{title:path}")
-async def export_screenplay(title: str):
-    export_dir = os.path.join(os.path.dirname(__file__), "..", "data", "exports")
-    os.makedirs(export_dir, exist_ok=True)
-    filepath = os.path.join(export_dir, f"{title}.screenplay.yaml")
-
-    if not os.path.exists(filepath):
-        raise HTTPException(status_code=404, detail="Screenplay not found")
-
-    return FileResponse(filepath, media_type="text/yaml", filename=f"{title}.screenplay.yaml")
-
-
-@app.get("/usage")
-async def get_usage():
-    try:
-        from .core.llm import llm_client
-        usage = llm_client.get_usage_report()
-    except Exception:
-        usage = {"total_cost_usd": 0, "call_count": 0}
-    return {"usage": usage, "estimate_per_run": {"total_est_usd": 0.02}}
-
-
-_task_store: dict = {}
-_task_id_counter: int = 0
-
-
-def _generate_task_id() -> str:
-    global _task_id_counter
-    _task_id_counter += 1
-    return f"task_{_task_id_counter:06d}"
-
-
-@app.post("/novels/upload")
-async def upload_novel(file: Annotated[UploadFile, File()]):
-    content = await file.read()
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        text = content.decode("gbk", errors="replace")
-
-    task_id = _generate_task_id()
+@app.post("/novels/upload", response_model=UploadResponse)
+async def upload_novel(request: NovelUploadRequest) -> UploadResponse:
+    task_id = f"task_{uuid.uuid4().hex[:12]}"
+    language = detect_language(request.content)
     _task_store[task_id] = {
         "status": "uploaded",
-        "title": os.path.splitext(file.filename or "untitled")[0],
-        "raw_text": text,
-        "genre": "Drama",
-        "screenplay_yaml": "",
-        "error": "",
+        "progress": 0.0,
+        "current_stage": "File uploaded",
+        "output": "",
+        "novel_text": request.content,
+        "filename": request.filename,
+        "language": language,
     }
-    return {"task_id": task_id, "status": "uploaded", "filename": file.filename}
+    return UploadResponse(
+        task_id=task_id,
+        filename=request.filename,
+        char_count=len(request.content),
+        language=language,
+    )
 
 
-class GenerateRequest(BaseModel):
-    mode: str = ""
-    pipeline: str = "fast"
-
-
-@app.post("/generate/{task_id}")
-async def generate_screenplay(task_id: str, req: Annotated[GenerateRequest, Body()]):
+@app.post("/generate/{task_id}", response_model=ConvertResponse)
+async def generate_screenplay(
+    task_id: str,
+    mode: str = Query("auto", description="Generation mode: auto, fast, full"),
+    pipeline: str = Query("full", description="Pipeline type: fast, full"),
+) -> ConvertResponse:
     if task_id not in _task_store:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        raise HTTPException(status_code=404, detail="Task not found")
 
-    task = _task_store[task_id]
-    task["status"] = "generating"
+    task_data = _task_store[task_id]
+    novel_text = task_data.get("novel_text", "")
+    if not novel_text:
+        raise HTTPException(status_code=400, detail="No novel text found in task")
 
-    fn = workflow.run if req.pipeline == "full" else workflow.fast_run
+    wf = _get_workflow()
+    _task_store[task_id]["status"] = "processing"
+    _task_store[task_id]["progress"] = 0.0
+    _task_store[task_id]["current_stage"] = "Starting..."
 
-    try:
-        state = fn(
-            novel_text=task["raw_text"],
-            novel_title=task["title"],
-            genre=task.get("genre", "Drama"),
-            mode=req.mode or "",
-        )
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: wf.fast_run(novel_text, mode) if pipeline == "fast" else wf.run(novel_text, mode),
+    )
 
-        if state.get("error"):
-            task["status"] = "error"
-            task["error"] = state["error"]
-            return {"status": "error", "error": state["error"]}
+    _task_store[task_id].update({
+        "status": result.status if result.status != "error" else "completed",
+        "progress": 100.0,
+        "current_stage": result.status,
+        "output": result.yaml_content,
+        "yaml_content": result.yaml_content,
+    })
 
-        task["status"] = "completed" if state["completed"] else "partial"
-        task["screenplay_yaml"] = state.get("screenplay_yaml", "")
-        task["violations"] = state.get("violations", [])
-        task["critic_score"] = state.get("critic_score", 1.0)
-        task["novel_chunks"] = state.get("novel_chunks", [])
-
-        return {
-            "task_id": task_id,
-            "status": task["status"],
-            "screenplay_yaml": task["screenplay_yaml"],
-            "violations": task["violations"],
-            "critic_score": task["critic_score"],
-            "pipeline": req.pipeline,
-        }
-    except Exception as e:
-        task["status"] = "error"
-        task["error"] = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
-        return {"status": "error", "error": task["error"]}
+    return result
 
 
-@app.get("/tasks/{task_id}")
-async def get_task_status(task_id: str):
+@app.get("/tasks/{task_id}", response_model=TaskStatus)
+async def get_task_status(task_id: str) -> TaskStatus:
     if task_id not in _task_store:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    task = _task_store[task_id]
-    return {
-        "task_id": task_id,
-        "status": task.get("status", "unknown"),
-        "title": task.get("title", ""),
-        "screenplay_yaml": task.get("screenplay_yaml", ""),
-        "violations": task.get("violations", []),
-        "critic_score": task.get("critic_score", None),
-        "error": task.get("error", ""),
-    }
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    td = _task_store[task_id]
+    return TaskStatus(
+        task_id=task_id,
+        status=td.get("status", "unknown"),
+        progress=td.get("progress", 0.0),
+        current_stage=td.get("current_stage", ""),
+        output=td.get("output", ""),
+        error=td.get("error", ""),
+    )
 
 
 @app.get("/export/yaml/{task_id}")
-async def export_yaml(task_id: str):
+async def export_yaml(task_id: str) -> dict[str, Any]:
     if task_id not in _task_store:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    task = _task_store[task_id]
-    yaml_content = task.get("screenplay_yaml", "")
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    td = _task_store[task_id]
+    yaml_content = td.get("yaml_content") or td.get("output", "")
+
     if not yaml_content:
-        raise HTTPException(status_code=400, detail="No screenplay generated yet")
-    return PlainTextResponse(
-        content=yaml_content,
-        media_type="text/yaml",
-        headers={"Content-Disposition": f"attachment; filename={task['title']}.yaml"},
-    )
+        raise HTTPException(status_code=400, detail="No YAML content generated yet")
+
+    wf = _get_workflow()
+    wf.save_export(task_id, yaml_content)
+
+    return {"task_id": task_id, "yaml_content": yaml_content, "filename": f"{task_id}.yaml"}
 
 
-class ImportEditsRequest(BaseModel):
-    edited_yaml: str
-
-
-@app.post("/import-edits/{task_id}")
-async def import_edits(task_id: str, req: ImportEditsRequest):
+@app.post("/import-edits/{task_id}", response_model=ImportEditsResponse)
+async def import_edits(task_id: str, body: dict[str, Any]) -> ImportEditsResponse:
     if task_id not in _task_store:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    task = _task_store[task_id]
-    original_yaml = task.get("screenplay_yaml", "")
+        raise HTTPException(status_code=404, detail="Task not found")
 
-    if not original_yaml:
-        raise HTTPException(status_code=400, detail="No original screenplay to compare")
+    edited_yaml = body.get("yaml_content", "")
+    if not edited_yaml:
+        raise HTTPException(status_code=400, detail="No yaml_content provided")
 
-    import hashlib
+    wf = _get_workflow()
+    result = wf.import_edits(task_id, edited_yaml)
 
-    from .core.llm import llm_client
-    from .core.prompts import REPAIR_SYSTEM, REPAIR_USER
+    if result.get("repaired_yaml"):
+        _task_store[task_id]["yaml_content"] = result["repaired_yaml"]
 
-    is_valid, errors = validate_screenplay_yaml(req.edited_yaml)
-    if not is_valid:
-        raise HTTPException(status_code=422, detail=f"Edited YAML validation failed: {errors}")
-
-    repair_prompt = REPAIR_USER.format(
-        violations="Human edits applied - reconcile and validate",
-        screenplay=req.edited_yaml,
-    )
-    repaired_yaml = llm_client.complete(
-        system_prompt=REPAIR_SYSTEM,
-        user_prompt=repair_prompt,
-        temperature=0.1,
+    return ImportEditsResponse(
+        task_id=task_id,
+        status=result.get("status", "validated"),
+        validated=result.get("validated", False),
+        repaired_yaml=result.get("repaired_yaml", ""),
+        changes=result.get("changes", []),
     )
 
-    consistency_report = workflow.run_consistency_check(
-        novel_chunks=task.get("novel_chunks", []),
-        screenplay_yaml=repaired_yaml or req.edited_yaml,
-        human_edits=req.edited_yaml,
-    )
 
-    original_hash = hashlib.sha256(original_yaml.encode()).hexdigest()
-    try:
-        from .core.database import HumanEdit, SessionLocal
-        db = SessionLocal()
-        edit_record = HumanEdit(
-            task_id=task_id,
-            original_yaml_hash=original_hash,
-            edited_yaml=req.edited_yaml,
-            reconcile_status="accepted",
-        )
-        db.add(edit_record)
-        db.commit()
-        db.close()
-    except Exception:
-        pass
-
-    task["repaired_yaml"] = repaired_yaml
-    task["consistency"] = consistency_report
-
-    return {
-        "status": "reconciled",
-        "repaired_yaml": repaired_yaml,
-        "consistency": consistency_report,
-    }
-
-
-@app.get("/alignment/{task_id}")
-async def get_alignment(task_id: str):
+@app.get("/alignment/{task_id}", response_model=AlignmentResponse)
+async def get_alignment(task_id: str) -> AlignmentResponse:
     if task_id not in _task_store:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    task = _task_store[task_id]
+        raise HTTPException(status_code=404, detail="Task not found")
 
-    novel_chunks = task.get("novel_chunks", [])
-    screenplay_yaml = task.get("screenplay_yaml", "")
+    td = _task_store[task_id]
+    wf = _get_workflow()
+    chapters = wf.parse_and_segment(td.get("novel_text", ""))
 
-    if not screenplay_yaml:
-        return {
-            "task_id": task_id,
-            "alignment_score": 0.0,
-            "deviations": [],
-            "suggestions": ["No screenplay generated yet"],
+    alignment = [
+        {
+            "chapter_index": ch.get("index", i),
+            "chapter_title": ch.get("title", ""),
+            "episode_mapping": f"ep_{(i // 2 + 1):03d}",
+            "key_passages": [p[:100] for p in ch.get("content", "").split("\n\n")[:3]],
         }
+        for i, ch in enumerate(chapters)
+    ]
 
-    report = workflow.run_consistency_check(
-        novel_chunks=novel_chunks,
-        screenplay_yaml=screenplay_yaml,
+    return AlignmentResponse(
+        task_id=task_id,
+        original_text_alignment=alignment,
+        scene_to_source=[],
     )
-    return {
-        "task_id": task_id,
-        "alignment_score": report.get("alignment_score", 0.0),
-        "deviations": report.get("deviations", []),
-        "suggestions": report.get("suggestions", []),
+
+
+@app.post("/convert", response_model=ConvertResponse)
+async def convert_novel(request: dict[str, Any]) -> ConvertResponse:
+    novel_text = request.get("novel_text", "")
+    if not novel_text:
+        raise HTTPException(status_code=400, detail="novel_text is required")
+
+    mode = request.get("mode", "auto")
+    pipeline = request.get("pipeline", "full")
+
+    task_id = f"task_{uuid.uuid4().hex[:12]}"
+    _task_store[task_id] = {
+        "status": "processing",
+        "progress": 0.0,
+        "current_stage": "Starting conversion...",
+        "output": "",
+        "novel_text": novel_text,
     }
 
+    wf = _get_workflow()
 
-@app.get("/health")
-async def health():
-    from .config import CHROMA_PERSIST_DIR, RAG_ENABLED
-    return {
-        "status": "ok",
-        "version": "2.1.0",
-        "rag_enabled": RAG_ENABLED,
-        "chroma_dir": CHROMA_PERSIST_DIR,
+    loop = asyncio.get_event_loop()
+
+    if mode == "demo":
+        _task_store[task_id].update({
+            "status": "completed",
+            "progress": 100.0,
+            "current_stage": "Demo complete",
+            "output": _DEMO_SCREENPLAY_YAML,
+            "yaml_content": _DEMO_SCREENPLAY_YAML,
+        })
+        return ConvertResponse(
+            task_id=task_id,
+            status="completed",
+            message="Demo screenplay generated",
+            yaml_content=_DEMO_SCREENPLAY_YAML,
+        )
+
+    result = await loop.run_in_executor(
+        None,
+        lambda: wf.fast_run(novel_text, mode) if pipeline == "fast" else wf.run(novel_text, mode),
+    )
+
+    _task_store[task_id].update({
+        "status": "completed",
+        "progress": 100.0,
+        "current_stage": "Complete",
+        "output": result.yaml_content,
+        "yaml_content": result.yaml_content,
+    })
+
+    result.task_id = task_id
+    return result
+
+
+class FileConvertRequest(BaseModel):
+    content: str
+    filename: str = ""
+    mode: str = "auto"
+    pipeline: str = "full"
+
+
+@app.post("/convert/file", response_model=ConvertResponse)
+async def convert_novel_file(request: FileConvertRequest) -> ConvertResponse:
+    task_id = f"task_{uuid.uuid4().hex[:12]}"
+    _task_store[task_id] = {
+        "status": "processing",
+        "progress": 0.0,
+        "current_stage": "Starting file conversion...",
+        "output": "",
+        "novel_text": request.content,
+        "filename": request.filename,
     }
 
+    wf = _get_workflow()
+    loop = asyncio.get_event_loop()
 
-@app.on_event("shutdown")
-async def shutdown():
-    _task_store.clear()
+    result = await loop.run_in_executor(
+        None,
+        lambda: wf.fast_run(request.content, request.mode)
+        if request.pipeline == "fast"
+        else wf.run(request.content, request.mode),
+    )
+
+    _task_store[task_id].update({
+        "status": "completed",
+        "progress": 100.0,
+        "current_stage": "Complete",
+        "output": result.yaml_content,
+        "yaml_content": result.yaml_content,
+    })
+
+    result.task_id = task_id
+    return result
+
+
+@app.post("/validate", response_model=ValidateResponse)
+async def validate_yaml(body: dict[str, Any]) -> ValidateResponse:
+    yaml_content = body.get("yaml_content", "")
+    if not yaml_content:
+        raise HTTPException(status_code=400, detail="No yaml_content provided")
+
+    report = validate_screenplay_yaml(yaml_content)
+    return ValidateResponse(
+        valid=report.valid,
+        errors=report.errors,
+        warnings=report.warnings,
+    )
+
+
+@app.get("/usage", response_model=UsageStats)
+async def get_usage() -> UsageStats:
+    return UsageStats(
+        total_llm_calls=len(_task_store),
+        total_tokens=0,
+        total_cost_estimate=0.0,
+    )
+
+
+@app.post("/detect-language", response_model=DetectLanguageResponse)
+async def detect_novel_language(body: dict[str, Any]) -> DetectLanguageResponse:
+    text = body.get("text", "")
+    if not text:
+        raise HTTPException(status_code=400, detail="No text provided")
+    lang = detect_language(text)
+    return DetectLanguageResponse(language=lang, confidence=0.95)

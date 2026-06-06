@@ -1,48 +1,30 @@
-"""Pydantic models for Novel2Screen data schemas.
-Matches the YAML schema spec from the design document.
-"""
 from __future__ import annotations
 
-from enum import StrEnum
+import re
+from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-# ── Beat Types ──
 
-class BeatType(StrEnum):
-    dialogue = "dialogue"
-    action = "action"
-    silence = "silence"
-    reaction = "reaction"
-
-
-class Transition(StrEnum):
-    cut = "cut"
-    fade = "fade"
-    dissolve = "dissolve"
-    wipe = "wipe"
+class BeatType(str, Enum):
+    DIALOGUE = "dialogue"
+    ACTION = "action"
+    SILENCE = "silence"
+    REACTION = "reaction"
 
 
-class Emotion(StrEnum):
-    anger = "anger"
-    fear = "fear"
-    joy = "joy"
-    sadness = "sadness"
-    surprise = "surprise"
-    disgust = "disgust"
-    anticipation = "anticipation"
-    calm = "calm"
-    tension = "tension"
-    confusion = "confusion"
-    resolve = "resolve"
+class Transition(str, Enum):
+    CUT = "cut"
+    FADE = "fade"
+    DISSOLVE = "dissolve"
+    WIPE = "wipe"
 
 
-# ── Character ──
-
-class CharacterRole(StrEnum):
-    protagonist = "protagonist"
-    antagonist = "antagonist"
-    supporting = "supporting"
+class CharacterRole(str, Enum):
+    PROTAGONIST = "protagonist"
+    ANTAGONIST = "antagonist"
+    SUPPORTING = "supporting"
 
 
 class Character(BaseModel):
@@ -53,10 +35,7 @@ class Character(BaseModel):
     fear: str = ""
     arc: str
     voice_style: str = ""
-    traits: list[str] = Field(default_factory=list)
 
-
-# ── Beat ──
 
 class Beat(BaseModel):
     type: BeatType
@@ -65,8 +44,6 @@ class Beat(BaseModel):
     emotion: str | None = None
 
 
-# ── Scene ──
-
 class Scene(BaseModel):
     scene_id: str = Field(pattern=r"^sc_\d+$")
     location: str
@@ -74,152 +51,159 @@ class Scene(BaseModel):
     visual_focus: str | None = None
     sound_effect: str | None = None
     voice_over: str | None = None
-    beats: list[Beat] = Field(default_factory=list, min_length=1)
-    transition: str = "cut"
-    duration_estimate: str = "120s"
+    beats: list[Beat] = Field(default_factory=list)
+    transition: Transition = Transition.CUT
+    duration_estimate: int = 60
 
-
-# ── Episode ──
 
 class Episode(BaseModel):
     id: str = Field(pattern=r"^ep_\d+$")
     title: str
     summary: str
-    theme: str = ""
-    pacing: str = ""
     scenes: list[Scene] = Field(default_factory=list)
 
 
-# ── Root Screenplay ──
-
 class Screenplay(BaseModel):
-    schema_version: str = "1.0"
     title: str
     logline: str
     genre: str
     theme: str
-    characters: list[Character] = Field(default_factory=list, min_length=1)
-    episodes: list[Episode] = Field(default_factory=list, min_length=1)
-
-
-# ── Narrative Agent Output ──
-
-class MajorEvent(BaseModel):
-    chapter: int
-    description: str
-    characters_involved: list[str] = Field(default_factory=list)
-
-
-class Subplot(BaseModel):
-    name: str
-    description: str
-    related_characters: list[str] = Field(default_factory=list)
-
-
-class TurningPoint(BaseModel):
-    chapter: int
-    description: str
-    impact: str = ""
+    characters: list[Character] = Field(default_factory=list)
+    episodes: list[Episode] = Field(default_factory=list)
 
 
 class NarrativeOutput(BaseModel):
-    major_events: list[MajorEvent]
-    subplots: list[Subplot]
-    turning_points: list[TurningPoint]
+    title: str
+    logline: str
+    genre: str
     theme: str
+    core_conflict: str
+    tone: str = ""
+    target_audience: str = ""
+    style_notes: str = ""
 
-
-# ── Character Agent Output ──
 
 class CharacterOutput(BaseModel):
-    characters: list[Character]
-
-
-# ── World Agent Output ──
-
-class WorldRule(BaseModel):
-    domain: str  # magic, technology, politics, etc.
-    description: str
-
-
-class Location(BaseModel):
-    name: str
-    description: str
-    significance: str = ""
+    characters: list[Character] = Field(default_factory=list)
 
 
 class WorldOutput(BaseModel):
-    world_rules: list[WorldRule] = Field(default_factory=list)
-    geography: list[Location] = Field(default_factory=list)
-
-
-# ── Timeline Agent Output ──
-
-class TimelineEvent(BaseModel):
-    chapter: int
-    description: str
-
-
-class TimelineNode(BaseModel):
-    id: str
-    event: str
-    chapter: int
-
-
-class TimelineEdge(BaseModel):
-    source: str
-    target: str
-    label: str = ""
+    locations: list[dict[str, Any]] = Field(default_factory=list)
+    world_rules: list[dict[str, Any]] = Field(default_factory=list)
+    atmosphere: str = ""
 
 
 class TimelineOutput(BaseModel):
-    events: list[TimelineEvent] = Field(default_factory=list)
-    graph: dict | None = None  # nodes + edges for long mode
-    conflicts: list[str] = Field(default_factory=list)
+    events: list[dict[str, Any]] = Field(default_factory=list)
+    timeline_type: str = "linear"
+    major_turning_points: list[str] = Field(default_factory=list)
 
 
-# ── Episode Planner Output ──
-
-class EpisodePlan(BaseModel):
-    episodes: list[Episode]
-
-
-# ── Scene Planner Output ──
-
-class ScenePlan(BaseModel):
-    scenes: list[Scene]
+class EpisodePlannerOutput(BaseModel):
+    episodes: list[dict[str, Any]] = Field(default_factory=list)
+    season_arc: str = ""
 
 
-# ── Dialogue Output ──
+class ScenePlannerOutput(BaseModel):
+    episode_id: str = ""
+    scenes: list[dict[str, Any]] = Field(default_factory=list)
+
 
 class DialogueOutput(BaseModel):
-    scenes: list[Scene]
-
-
-# ── Critic Violation ──
-
-class Violation(BaseModel):
-    category: str  # continuity, pacing, character_motivation, dialogue, shootability, line_balance
-    severity: str  # error, warning
-    description: str
-    location: str = ""
+    beats: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CriticOutput(BaseModel):
-    violations: list[Violation] = Field(default_factory=list)
-    score: float = 1.0
+    score: float = Field(default=0.0, ge=0.0, le=10.0)
+    issues: list[dict[str, Any]] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+    overall_assessment: str = ""
 
-
-# ── Repair Output ──
 
 class RepairOutput(BaseModel):
-    screenplay: Screenplay
-    changes_made: list[str] = Field(default_factory=list)
+    repaired_yaml: str = ""
+    changes_made: list[dict[str, Any]] = Field(default_factory=list)
+    validation_passed: bool = False
 
-
-# ── Consistency Agent Output ──
 
 class ConsistencyOutput(BaseModel):
-    alignment_score: float = Field(ge=0.0, le=1.0)
-    deviations: list[str] = Field(default_factory=list)
-    suggestions: list[str] = Field(default_factory=list)
+    consistent: bool = True
+    issues: list[dict[str, Any]] = Field(default_factory=list)
+    resolved: bool = False
+
+
+class ConvertRequest(BaseModel):
+    novel_text: str
+    mode: str = "auto"
+    pipeline: str = "full"
+
+
+class ConvertResponse(BaseModel):
+    task_id: str
+    status: str
+    message: str = ""
+    yaml_content: str = ""
+    screenplay: Screenplay | None = None
+
+
+class TaskStatus(BaseModel):
+    task_id: str
+    status: str
+    progress: float = 0.0
+    current_stage: str = ""
+    output: str = ""
+    error: str = ""
+
+
+class UploadResponse(BaseModel):
+    task_id: str
+    filename: str
+    char_count: int
+    language: str
+
+
+class ImportEditsResponse(BaseModel):
+    task_id: str
+    status: str
+    validated: bool = False
+    repaired_yaml: str = ""
+    changes: list[str] = Field(default_factory=list)
+
+
+class AlignmentResponse(BaseModel):
+    task_id: str
+    original_text_alignment: list[dict[str, Any]] = Field(default_factory=list)
+    scene_to_source: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ValidateResponse(BaseModel):
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class UsageStats(BaseModel):
+    total_llm_calls: int = 0
+    total_tokens: int = 0
+    total_cost_estimate: float = 0.0
+
+
+class DetectLanguageResponse(BaseModel):
+    language: str
+    confidence: float = 1.0
+
+
+class HealthResponse(BaseModel):
+    status: str = "ok"
+    version: str = "2.0.0"
+
+
+class NovelUploadRequest(BaseModel):
+    content: str
+    filename: str = ""
+
+
+class ValidationReport(BaseModel):
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

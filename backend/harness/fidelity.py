@@ -1,80 +1,95 @@
-# Novel2Screen Fidelity Scrubber - hallucination detection layer.
+from __future__ import annotations
 
-def _name_in_text(name: str, text: str) -> bool:
-    name_l = name.lower().strip()
-    text_l = text.lower()
-    if name_l in ("protagonist", "antagonist", "character", "narrator", "hero", "villain"):
-        return False
-    if name_l in text_l:
-        return True
-    for part in name.split():
-        p = part.strip('.,;:!?" ')
-        if len(p) >= 2 and p.lower() in text_l:
-            return True
-    return False
+from dataclasses import dataclass, field
+from typing import Any
 
 
-def detect_fabricated_characters(chars: list, novel_text: str) -> list:
-    suspicious = []
-    for c in chars:
-        nm = c.get("name", "") if isinstance(c, dict) else ""
-        cid = c.get("id", "") if isinstance(c, dict) else ""
-        if not nm or len(nm) < 2:
-            continue
-        if nm.lower() in ("protagonist", "antagonist", "character", "hero", "villain"):
-            suspicious.append({"id": cid, "name": nm, "reason": "placeholder name"})
-        elif novel_text and not _name_in_text(nm, novel_text):
-            suspicious.append({"id": cid, "name": nm, "reason": "not found in original novel"})
-    return suspicious
+@dataclass
+class FidelityReport:
+    passed: bool
+    fabricated_characters: list[str] = field(default_factory=list)
+    fabricated_locations: list[str] = field(default_factory=list)
+    missing_elements: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
-def detect_fabricated_locations(locations: list, novel_text: str) -> list:
-    suspicious = []
-    for loc in locations:
-        nm = loc.get("name", "") if isinstance(loc, dict) else ""
-        if not nm or len(nm) < 2:
-            continue
-        if nm.lower() in ("main setting", "unknown", "somewhere"):
-            suspicious.append({"name": nm, "reason": "placeholder"})
-        elif novel_text and not _name_in_text(nm, novel_text):
-            suspicious.append({"name": nm, "reason": "not found in original novel"})
-    return suspicious
+class FidelityChecker:
+    def __init__(self, character_names: set[str], location_names: set[str]) -> None:
+        self.character_names = character_names
+        self.location_names = location_names
+
+    def check(self, screenplay_data: dict[str, Any]) -> FidelityReport:
+        fabricated_chars = detect_fabricated_characters(
+            screenplay_data.get("characters", []), self.character_names
+        )
+        fabricated_locs = detect_fabricated_locations(
+            screenplay_data, self.location_names
+        )
+        warnings: list[str] = []
+
+        passed = not fabricated_chars and not fabricated_locs
+        if fabricated_chars:
+            warnings.append(f"Fabricated characters: {fabricated_chars}")
+        if fabricated_locs:
+            warnings.append(f"Fabricated locations: {fabricated_locs}")
+
+        return FidelityReport(
+            passed=passed,
+            fabricated_characters=fabricated_chars,
+            fabricated_locations=fabricated_locs,
+            warnings=warnings,
+        )
 
 
-def validate_character_ids_in_episodes(episodes: list, valid_ids: set) -> list:
-    violations = []
-    if not valid_ids:
-        return violations
+def detect_fabricated_characters(
+    screenplay_characters: list[dict[str, Any]],
+    source_characters: set[str],
+) -> list[str]:
+    if not source_characters:
+        return []
+    fabricated: list[str] = []
+    for c in screenplay_characters:
+        name = c.get("name", "")
+        if name and name not in source_characters:
+            fabricated.append(name)
+    return fabricated
+
+
+def detect_fabricated_locations(
+    screenplay_data: dict[str, Any],
+    source_locations: set[str],
+) -> list[str]:
+    if not source_locations:
+        return []
+    locations_found: set[str] = set()
+    episodes = screenplay_data.get("episodes", [])
     for ep in episodes:
-        if not isinstance(ep, dict):
-            continue
-        eid = ep.get("id", "")
         for sc in ep.get("scenes", []):
-            if not isinstance(sc, dict):
-                continue
-            sid = sc.get("scene_id", "")
-            for bi, beat in enumerate(sc.get("beats", [])):
-                cid = beat.get("character_id") if isinstance(beat, dict) else None
-                if beat.get("type") == "dialogue" and cid and cid not in valid_ids:
-                    violations.append(f"Episode {eid}, Scene {sid}, Beat {bi+1}: char {cid} not valid")
-    return violations
+            loc = sc.get("location", "")
+            if loc:
+                locations_found.add(loc)
+    return sorted(loc for loc in locations_found if loc not in source_locations)
 
 
-def run_fidelity_check(preprocess_output: dict, batch_plan_output: dict, novel_text: str) -> dict:
-    chars = preprocess_output.get("characters", []) if isinstance(preprocess_output, dict) else []
-    locs = preprocess_output.get("locations", []) if isinstance(preprocess_output, dict) else []
-    episodes = batch_plan_output.get("episodes", []) if isinstance(batch_plan_output, dict) else []
+def validate_character_ids_in_episodes(
+    episodes: list[dict[str, Any]],
+    valid_character_ids: set[str],
+) -> list[str]:
+    errors: list[str] = []
+    for ep in episodes:
+        for sc in ep.get("scenes", []):
+            for beat in sc.get("beats", []):
+                char_id = beat.get("character_id")
+                if char_id and char_id not in valid_character_ids:
+                    errors.append(f"Unknown character '{char_id}' in scene {sc.get('scene_id', '?')}")
+    return errors
 
-    fabricated_chars = detect_fabricated_characters(chars, novel_text)
-    fabricated_locs = detect_fabricated_locations(locs, novel_text)
-    valid_ids = {c.get("id", "") for c in chars if isinstance(c, dict) and c.get("id")}
-    id_violations = validate_character_ids_in_episodes(episodes, valid_ids)
-    total = len(fabricated_chars) + len(fabricated_locs) + len(id_violations)
-    score = max(0.0, 1.0 - total * 0.15)
 
-    return {
-        "fabricated_chars": fabricated_chars,
-        "fabricated_locs": fabricated_locs,
-        "id_violations": id_violations,
-        "fidelity_score": score,
-    }
+def run_fidelity_check(
+    screenplay: dict[str, Any],
+    original_text: str,
+) -> FidelityReport:
+    return FidelityChecker(
+        character_names=set(),
+        location_names=set(),
+    ).check(screenplay)

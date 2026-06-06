@@ -1,48 +1,81 @@
-"""DialogueAgent - Writes full screenplay dialogue with beats."""
-import json
+from __future__ import annotations
 
-from ..core.llm import llm_client
-from ..core.prompts import DIALOGUE_SYSTEM, DIALOGUE_USER
-from ..schemas.models import Scene
-from .base import AgentBase
+from typing import Any
+
+from backend.agents.base import AgentBase
 
 
 class DialogueAgent(AgentBase):
-    """Writes screenplay dialogue adhering to character voice styles."""
+    def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        novel_text: str = input_data.get("novel_text", "")
+        characters: list[dict[str, Any]] = input_data.get("characters", [])
+        scene: dict[str, Any] = input_data.get("scene", {})
+        narrative: dict[str, Any] = input_data.get("narrative", {})
 
-    def __init__(self, model: str = "gpt-4o-mini"):
-        super().__init__(name="DialogueAgent", model=model)
+        query = f"{scene.get('scene_id', '')} {scene.get('location', novel_text[:500])}"
+        system_prompt = "You are a dialogue writer for screenplays. Output valid JSON only."
 
-    def run(self, input_data: dict) -> dict:
-        response = llm_client.complete(
-            system_prompt=DIALOGUE_SYSTEM,
-            user_prompt=DIALOGUE_USER.format(
-                scene_plan=json.dumps(input_data.get("scene_plan", {}), ensure_ascii=False),
-                characters=json.dumps(input_data.get("characters", []), ensure_ascii=False),
-            ),
-            model=self.model,
-            temperature=0.4,
+        character_styles = "\n".join(
+            f"- {c.get('name', '')} ({c.get('id', '')}): {c.get('voice_style', 'natural')}"
+            for c in characters
         )
-        return self._parse_response(response)
 
+        base_prompt = f"""Write dialogue and action beats for a scene.
 
-    def _parse_response(self, text: str) -> dict:
-        import re
-        text = text.strip()
-        text = re.sub(r"`(?:json)?\s*", "", text)
-        text = re.sub(r"\s*`", "", text)
-        text = text.strip()
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-            raise
+Scene: {scene}
+Tone: {narrative.get('tone', 'dramatic')}
 
-    def validate(self, output: dict) -> bool:
-        try:
-            Scene(**output)
-            return len(output.get("beats", [])) >= 2
-        except Exception:
+Character voice styles:
+{character_styles if character_styles else 'No characters defined, create natural dialogue.'}
+
+Output an array of beats. Each beat should be:
+- type: "dialogue", "action", "silence", or "reaction"
+- character_id: char_XXX format (for dialogue/reaction beats)
+- content: The dialogue text or action description
+- emotion: Emotional tone of the beat
+
+Example beat:
+{{"type": "dialogue", "character_id": "char_001", "content": "I never asked for this power.", "emotion": "regret"}}
+
+Ensure each dialogue beat is distinctive to the character's voice style.
+Use silences strategically for dramatic effect.
+Include reaction beats showing non-verbal responses.
+
+Novel excerpt for reference:
+{novel_text[:3000]}
+
+Output ONLY a JSON object with field "beats" containing an array. No markdown, no explanation."""
+
+        prompt = self._build_rag_prompt(base_prompt, query)
+
+        if self._retry_errors:
+            prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
+
+        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.8)
+        return self._parse_json(response)
+
+    def validate(self, output: dict[str, Any]) -> bool:
+        beats = output.get("beats", [])
+        if not isinstance(beats, list) or not beats:
             return False
+        valid_types = {"dialogue", "action", "silence", "reaction"}
+        for beat in beats:
+            if beat.get("type") not in valid_types:
+                return False
+            if not beat.get("content"):
+                return False
+        return True
+
+    def validate_with_errors(self, output: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        beats = output.get("beats", [])
+        valid_types = {"dialogue", "action", "silence", "reaction"}
+        if not isinstance(beats, list) or not beats:
+            errors.append("beats must be a non-empty list")
+        else:
+            for i, beat in enumerate(beats):
+                if beat.get("type") not in valid_types:
+                    errors.append(f"Beat {i}: invalid type '{beat.get('type')}'")
+                if not beat.get("content"):
+                    errors.append(f"Beat {i}: missing content")
+        return errors

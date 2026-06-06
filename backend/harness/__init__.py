@@ -1,21 +1,24 @@
-"""Novel2Screen Harness: Stage-based pipeline orchestration.
+from __future__ import annotations
 
-Components:
-  - orchestrator:  Pipeline state machine (fast / full)
-  - novel_reader:  Language detection, chapter parsing, smart chunking
-  - output_validator: Comprehensive YAML validation
-"""
-from .novel_reader import detect_language, get_emotion_set, parse_chapters
-from .orchestrator import build_state, run_pipeline, state_to_response
-from .output_validator import ValidationReport, validate_screenplay_output
+from backend.harness.orchestrator import PipelineOrchestrator, build_fast_pipeline, build_full_pipeline, state_to_response
+from backend.harness.output_validator import OutputValidator, ValidationReport
+from backend.harness.fidelity import FidelityChecker, detect_fabricated_characters, detect_fabricated_locations, run_fidelity_check
+from backend.harness.novel_reader import NovelReader, detect_language, parse_chapters, estimate_tokens, smart_chunk
 
 __all__ = [
-    "ValidationReport",
-    "build_state",
-    "detect_language",
-    "get_emotion_set",
-    "parse_chapters",
-    "run_pipeline",
+    "PipelineOrchestrator",
+    "build_fast_pipeline",
+    "build_full_pipeline",
     "state_to_response",
-    "validate_screenplay_output",
+    "OutputValidator",
+    "ValidationReport",
+    "FidelityChecker",
+    "detect_fabricated_characters",
+    "detect_fabricated_locations",
+    "run_fidelity_check",
+    "NovelReader",
+    "detect_language",
+    "parse_chapters",
+    "estimate_tokens",
+    "smart_chunk",
 ]

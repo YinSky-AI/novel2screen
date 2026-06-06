@@ -1,41 +1,74 @@
-﻿"""RepairAgent - Auto-fixes issues found by CriticAgent."""
-import json
+from __future__ import annotations
 
-from ..core.llm import llm_client
-from ..core.prompts import REPAIR_SYSTEM, REPAIR_USER
-from .base import AgentBase
+from typing import Any
+
+from backend.agents.base import AgentBase
 
 
 class RepairAgent(AgentBase):
-    """Fixes screenplay issues: timeline conflicts, duplicates, character drift."""
+    def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        yaml_content: str = input_data.get("yaml_content", "")
+        issues: list[dict[str, Any]] = input_data.get("issues", [])
+        suggestions: list[str] = input_data.get("suggestions", [])
+        original_text: str = input_data.get("original_text", "")
 
-    def __init__(self, model: str = "gpt-4o-mini"):
-        super().__init__(name="RepairAgent", model=model)
+        query = yaml_content[:2000]
+        system_prompt = "You are a screenplay repair specialist. Output valid JSON only."
 
-    def run(self, input_data: dict) -> dict:
-        response = llm_client.complete(
-            system_prompt=REPAIR_SYSTEM,
-            user_prompt=REPAIR_USER.format(
-                violations=json.dumps(input_data.get("violations", []), ensure_ascii=False),
-                screenplay=input_data.get("screenplay", ""),
-            ),
-            model=self.model,
-            temperature=0.2,
+        issues_text = "\n".join(
+            f"- [{i.get('severity', '?')}] {i.get('category', '?')}: {i.get('description', '')}"
+            for i in issues
         )
-        # Return structured output compatible with RepairOutput model
-        violations = input_data.get("violations", [])
-        changes = []
-        for v in violations:
-            if isinstance(v, dict):
-                cat = v.get("category", "")
-                changes.append(f"Fixed {cat}")
-        if not changes:
-            changes.append("Auto-repair applied")
-        return {
-            "yaml_output": response,
-            "screenplay": None,
-            "changes_made": changes,
-        }
+        suggestions_text = "\n".join(f"- {s}" for s in suggestions)
 
-    def validate(self, output: dict) -> bool:
-        return bool(output.get("yaml_output", ""))
+        base_prompt = f"""Repair the following screenplay YAML based on the identified issues and suggestions.
+
+Issues found:
+{issues_text if issues_text else 'No specific issues provided.'}
+
+Suggestions:
+{suggestions_text if suggestions_text else 'No specific suggestions provided.'}
+
+Current YAML:
+{yaml_content[:10000]}
+
+Original text reference:
+{original_text[:3000]}
+
+Output ONLY a JSON object with:
+- **repaired_yaml**: The full corrected YAML as a string
+- **changes_made**: Array of objects describing each change: {{field, before, after, reason}}
+- **validation_passed**: boolean indicating if the repair resolves all issues
+
+Preserve the YAML structure exactly. Only fix identified problems.
+Ensure all character IDs referenced exist in the character list.
+Ensure all scene_ids are unique across episodes.
+Ensure all transitions are valid (cut, fade, dissolve, wipe).
+Ensure all beat types are valid (dialogue, action, silence, reaction).
+
+No markdown, no explanation."""
+
+        prompt = self._build_rag_prompt(base_prompt, query)
+
+        if self._retry_errors:
+            prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
+
+        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.3)
+        return self._parse_json(response)
+
+    def validate(self, output: dict[str, Any]) -> bool:
+        return "repaired_yaml" in output and isinstance(output["repaired_yaml"], str) and len(output["repaired_yaml"]) > 10
+
+    def validate_with_errors(self, output: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        if "repaired_yaml" not in output:
+            errors.append("Missing repaired_yaml field")
+        elif not isinstance(output["repaired_yaml"], str):
+            errors.append("repaired_yaml must be a string")
+        elif len(output["repaired_yaml"]) < 10:
+            errors.append("repaired_yaml is too short")
+        if not isinstance(output.get("changes_made"), list):
+            errors.append("changes_made must be a list")
+        if "validation_passed" not in output:
+            errors.append("Missing validation_passed field")
+        return errors

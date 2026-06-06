@@ -1,142 +1,336 @@
-﻿"""Unit tests for Novel2Screen Pydantic schemas and YAML validation."""
-import os
-import sys
+from __future__ import annotations
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from pydantic import ValidationError
 
 from backend.schemas.models import (
+    AlignmentResponse,
     Beat,
+    BeatType,
     Character,
+    CharacterOutput,
+    CharacterRole,
     ConsistencyOutput,
+    ConvertRequest,
+    ConvertResponse,
+    CriticOutput,
+    DetectLanguageResponse,
+    DialogueOutput,
     Episode,
+    EpisodePlannerOutput,
+    HealthResponse,
+    ImportEditsResponse,
     NarrativeOutput,
+    RepairOutput,
     Scene,
+    ScenePlannerOutput,
     Screenplay,
-    Violation,
+    TaskStatus,
+    TimelineOutput,
+    Transition,
+    UploadResponse,
+    UsageStats,
+    ValidateResponse,
+    WorldOutput,
 )
-from backend.schemas.validator import screenplay_to_yaml, validate_screenplay_yaml, yaml_to_screenplay
 
 
-class TestPydanticModels:
-    def test_character_valid(self):
-        c = Character(
-            id="char_001", name="Hero", role="protagonist",
-            goal="Save world", arc="Growth", fear="Loss",
-        )
-        assert c.id == "char_001"
+# ---------------------------------------------------------------------------
+# Minimal screenplay (valid)
+# ---------------------------------------------------------------------------
 
-    def test_character_invalid_id(self):
-        with pytest.raises(Exception):
-            Character(id="bad_id", name="X", role="protagonist", goal="X", arc="X")
-
-    def test_beat_valid(self):
-        b = Beat(type="dialogue", character_id="char_001", content="Hello", emotion="calm")
-        assert b.type == "dialogue"
-
-    def test_scene_valid(self):
-        s = Scene(
-            scene_id="sc_001", location="Park", time="Morning",
-            beats=[Beat(type="action", content="Enter.", emotion=None)],
-        )
-        assert s.scene_id == "sc_001"
-
-    def test_scene_empty_beats(self):
-        with pytest.raises(Exception):
-            Scene(scene_id="sc_001", location="X", time="X", beats=[])
-
-    def test_episode_valid(self):
-        e = Episode(
-            id="ep_001", title="Pilot", summary="Start",
-            scenes=[Scene(
-                scene_id="sc_001", location="X", time="X",
-                beats=[Beat(type="action", content="Y", emotion=None)],
-            )],
-        )
-        assert e.id == "ep_001"
-
-    def test_screenplay_empty_characters(self):
-        with pytest.raises(Exception):
-            Screenplay(title="Test", logline="L", genre="Drama", theme="T", characters=[], episodes=[])
-
-    def test_screenplay_complete(self):
+class TestMinimalScreenplay:
+    def test_minimal_valid(self) -> None:
         sp = Screenplay(
-            title="Test", logline="A story", genre="Drama", theme="Hope",
-            characters=[Character(id="char_001", name="Hero", role="protagonist", goal="Win", arc="Grow")],
-            episodes=[Episode(
-                id="ep_001", title="Pilot", summary="Start",
-                scenes=[Scene(
-                    scene_id="sc_001", location="X", time="X",
-                    beats=[Beat(type="action", content="Y", emotion=None)],
-                )],
-            )],
+            title="Min",
+            logline="A minimal test.",
+            genre="Test",
+            theme="Minimal",
         )
-        assert sp.title == "Test"
+        assert sp.title == "Min"
+        assert sp.characters == []
+        assert sp.episodes == []
+
+    def test_full_screenplay_valid(self) -> None:
+        sp = Screenplay(
+            title="Full",
+            logline="A full test.",
+            genre="Drama",
+            theme="Full test",
+            characters=[
+                Character(
+                    id="char_001",
+                    name="Hero",
+                    role=CharacterRole.PROTAGONIST,
+                    goal="Win",
+                    arc="Growth",
+                ),
+            ],
+            episodes=[
+                Episode(
+                    id="ep_001",
+                    title="First",
+                    summary="Episode one",
+                    scenes=[
+                        Scene(
+                            scene_id="sc_001",
+                            location="Room",
+                            time="Day",
+                            beats=[
+                                Beat(type=BeatType.DIALOGUE, character_id="char_001", content="Let's go!"),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        assert sp.title == "Full"
+        assert len(sp.characters) == 1
         assert len(sp.episodes) == 1
 
-    def test_narrative_output_valid(self):
-        no = NarrativeOutput(
-            major_events=[{"chapter": 1, "description": "X", "characters_involved": ["A"]}],
-            subplots=[{"name": "S", "description": "D", "related_characters": ["A"]}],
-            turning_points=[{"chapter": 2, "description": "T", "impact": "Big"}],
-            theme="Test",
+
+# ---------------------------------------------------------------------------
+# Missing required fields
+# ---------------------------------------------------------------------------
+
+class TestMissingRequiredFields:
+    def test_screenplay_missing_title(self) -> None:
+        with pytest.raises(ValidationError):
+            Screenplay(logline="No title", genre="X", theme="X")
+
+    def test_episode_missing_id(self) -> None:
+        with pytest.raises(ValidationError):
+            Episode(title="No ID", summary="Missing id")
+
+    def test_scene_missing_id(self) -> None:
+        with pytest.raises(ValidationError):
+            Scene(location="Room", time="Now")
+
+    def test_beat_missing_type(self) -> None:
+        with pytest.raises(ValidationError):
+            Beat(content="No type")
+
+    def test_character_missing_name(self) -> None:
+        with pytest.raises(ValidationError):
+            Character(id="char_001", role=CharacterRole.SUPPORTING, goal="G", arc="A")
+
+
+# ---------------------------------------------------------------------------
+# Invalid type IDs
+# ---------------------------------------------------------------------------
+
+class TestInvalidTypeIDs:
+    def test_invalid_episode_id_format(self) -> None:
+        with pytest.raises(ValidationError):
+            Episode(id="bad", title="X", summary="X")
+
+    def test_invalid_scene_id_format(self) -> None:
+        with pytest.raises(ValidationError):
+            Scene(scene_id="scene-1", location="X", time="X")
+
+    def test_invalid_beat_type(self) -> None:
+        with pytest.raises(ValidationError):
+            Beat(type="singing", content="Not a valid type")
+
+
+# ---------------------------------------------------------------------------
+# Invalid transition
+# ---------------------------------------------------------------------------
+
+class TestInvalidTransition:
+    def test_invalid_transition(self) -> None:
+        with pytest.raises(ValidationError):
+            Scene(
+                scene_id="sc_001",
+                location="Room",
+                time="Now",
+                transition="jump",
+            )
+
+    def test_valid_transitions(self) -> None:
+        for t in ("cut", "fade", "dissolve", "wipe"):
+            s = Scene(scene_id="sc_001", location="Room", time="Now", transition=Transition(t))
+            assert s.transition == Transition(t)
+
+
+# ---------------------------------------------------------------------------
+# Invalid character role
+# ---------------------------------------------------------------------------
+
+class TestInvalidCharacterRole:
+    def test_invalid_role(self) -> None:
+        with pytest.raises(ValidationError):
+            Character(id="char_001", name="Bad", role="extra", goal="G", arc="A")
+
+    def test_valid_roles(self) -> None:
+        for role in ("protagonist", "antagonist", "supporting"):
+            c = Character(
+                id="char_001",
+                name="Test",
+                role=CharacterRole(role),
+                goal="Goal",
+                arc="Arc",
+            )
+            assert c.role == CharacterRole(role)
+
+
+# ---------------------------------------------------------------------------
+# Max scenes constraint
+# ---------------------------------------------------------------------------
+
+class TestMaxScenesConstraint:
+    def test_many_scenes(self) -> None:
+        scenes = [
+            Scene(
+                scene_id=f"sc_{i:03d}",
+                location=f"Loc{i}",
+                time="Day",
+                beats=[Beat(type=BeatType.ACTION, content="x")],
+            )
+            for i in range(1, 51)
+        ]
+        ep = Episode(id="ep_001", title="Many", summary="50 scenes", scenes=scenes)
+        assert len(ep.scenes) == 50
+
+
+# ---------------------------------------------------------------------------
+# Agent output model tests
+# ---------------------------------------------------------------------------
+
+class TestAgentOutputModels:
+    def test_narrative_output_valid(self) -> None:
+        o = NarrativeOutput(
+            title="T",
+            logline="L",
+            genre="G",
+            theme="Th",
+            core_conflict="CC",
+            tone="dark",
+            target_audience="adults",
+            style_notes="cinematic",
         )
-        assert no.theme == "Test"
+        assert o.title == "T"
 
-    def test_violation_valid(self):
-        v = Violation(category="pacing", severity="warning", description="Fast", location="sc_001")
-        assert v.severity == "warning"
-
-    def test_consistency_output_valid(self):
-        co = ConsistencyOutput(alignment_score=0.8, deviations=["X"], suggestions=["Y"])
-        assert co.alignment_score == 0.8
-
-    def test_consistency_output_invalid_score(self):
-        with pytest.raises(Exception):
-            ConsistencyOutput(alignment_score=1.5, deviations=[], suggestions=[])
-
-
-class TestYAMLValidation:
-    def test_valid_yaml(self):
-        sp = Screenplay(
-            title="Test", logline="L", genre="Drama", theme="T",
-            characters=[Character(id="char_001", name="A", role="protagonist", goal="G", arc="Arc")],
-            episodes=[Episode(
-                id="ep_001", title="Ep1", summary="S",
-                scenes=[Scene(
-                    scene_id="sc_001", location="L", time="T",
-                    beats=[Beat(type="action", content="C", emotion=None)],
-                )],
-            )],
+    def test_narrative_output_minimal(self) -> None:
+        o = NarrativeOutput(
+            title="T",
+            logline="L",
+            genre="G",
+            theme="Th",
+            core_conflict="C",
         )
-        yaml_str = screenplay_to_yaml(sp)
-        valid, errors = validate_screenplay_yaml(yaml_str)
-        assert valid is True, f"Errors: {errors}"
+        assert o.tone == ""
 
-    def test_invalid_yaml_string(self):
-        valid, _errors = validate_screenplay_yaml("::: not valid yaml :::")
-        assert valid is False
+    def test_character_output(self) -> None:
+        o = CharacterOutput(characters=[])
+        assert o.characters == []
 
-    def test_empty_dict_yaml(self):
-        valid, _errors = validate_screenplay_yaml("title: Test")
-        assert valid is False
+    def test_world_output(self) -> None:
+        o = WorldOutput(locations=[], world_rules=[], atmosphere="dark")
+        assert o.atmosphere == "dark"
 
-    def test_round_trip_yaml(self):
-        sp = Screenplay(
-            title="RoundTrip", logline="Test round trip", genre="SciFi", theme="AI",
-            characters=[Character(id="char_001", name="Bot", role="protagonist", goal="Learn", arc="Grow")],
-            episodes=[Episode(
-                id="ep_001", title="Start", summary="Begins",
-                scenes=[Scene(
-                    scene_id="sc_001", location="Lab", time="Dawn",
-                    beats=[Beat(type="dialogue", character_id="char_001", content="Hello", emotion="calm")],
-                    transition="fade", duration_estimate="30s",
-                )],
-            )],
+    def test_timeline_output(self) -> None:
+        o = TimelineOutput(
+            events=[{"order": 1, "description": "Start"}],
+            timeline_type="linear",
+            major_turning_points=["The reveal"],
         )
-        yaml_str = screenplay_to_yaml(sp)
-        parsed = yaml_to_screenplay(yaml_str)
-        assert parsed.title == "RoundTrip"
-        assert len(parsed.characters) == 1
-        assert parsed.episodes[0].scenes[0].beats[0].content == "Hello"
+        assert o.events[0]["description"] == "Start"
+
+    def test_episode_planner_output(self) -> None:
+        o = EpisodePlannerOutput(episodes=[], season_arc="")
+        assert o.episodes == []
+
+    def test_scene_planner_output(self) -> None:
+        o = ScenePlannerOutput(episode_id="ep_001", scenes=[])
+        assert o.episode_id == "ep_001"
+
+    def test_dialogue_output(self) -> None:
+        o = DialogueOutput(beats=[{"type": "dialogue", "content": "Hi"}])
+        assert len(o.beats) == 1
+
+    def test_critic_output_score_range(self) -> None:
+        o = CriticOutput(score=7.5, issues=[], suggestions=[], overall_assessment="Good")
+        assert 0 <= o.score <= 10
+
+    def test_critic_output_score_out_of_range(self) -> None:
+        with pytest.raises(ValidationError):
+            CriticOutput(score=15.0, issues=[], suggestions=[], overall_assessment="Bad")
+
+    def test_repair_output(self) -> None:
+        o = RepairOutput(
+            repaired_yaml="title: X",
+            changes_made=[{"field": "title", "before": "?", "after": "X"}],
+            validation_passed=True,
+        )
+        assert o.repaired_yaml == "title: X"
+        assert o.validation_passed
+
+    def test_consistency_output(self) -> None:
+        o = ConsistencyOutput(consistent=True, issues=[], resolved=True)
+        assert o.consistent
+        assert o.resolved
+
+
+# ---------------------------------------------------------------------------
+# API request/response models
+# ---------------------------------------------------------------------------
+
+class TestAPIRequestResponse:
+    def test_convert_request(self) -> None:
+        r = ConvertRequest(novel_text="Once upon a time...")
+        assert r.mode == "auto"
+        assert r.pipeline == "full"
+
+    def test_convert_response(self) -> None:
+        r = ConvertResponse(
+            task_id="task_abc123",
+            status="completed",
+            message="Done",
+            yaml_content="title: T",
+        )
+        assert r.task_id == "task_abc123"
+        assert r.status == "completed"
+
+    def test_task_status(self) -> None:
+        ts = TaskStatus(task_id="task_1", status="processing", progress=50.0)
+        assert ts.progress == 50.0
+
+    def test_upload_response(self) -> None:
+        r = UploadResponse(task_id="t1", filename="novel.txt", char_count=1000, language="en")
+        assert r.char_count == 1000
+
+    def test_import_edits_response(self) -> None:
+        r = ImportEditsResponse(
+            task_id="t1",
+            status="validated",
+            validated=True,
+            repaired_yaml="title: X",
+            changes=["title"],
+        )
+        assert r.validated
+
+    def test_alignment_response(self) -> None:
+        r = AlignmentResponse(task_id="t1")
+        assert r.original_text_alignment == []
+
+    def test_validate_response(self) -> None:
+        r = ValidateResponse(valid=True, errors=[], warnings=["No characters"])
+        assert r.valid
+        assert len(r.warnings) == 1
+
+    def test_validate_response_invalid(self) -> None:
+        r = ValidateResponse(valid=False, errors=["Missing title"])
+        assert not r.valid
+
+    def test_usage_stats(self) -> None:
+        s = UsageStats(total_llm_calls=5, total_tokens=1000, total_cost_estimate=0.02)
+        assert s.total_llm_calls == 5
+
+    def test_detect_language_response(self) -> None:
+        r = DetectLanguageResponse(language="chinese", confidence=0.95)
+        assert r.language == "chinese"
+
+    def test_health_response(self) -> None:
+        r = HealthResponse(status="ok", version="2.0.0")
+        assert r.status == "ok"

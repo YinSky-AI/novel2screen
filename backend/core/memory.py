@@ -1,434 +1,366 @@
-﻿"""Memory management for Novel2Screen.
-Handles short-term, long-term, and semantic memory (ChromaDB-backed RAG).
-"""
 from __future__ import annotations
 
-import hashlib
 import json
+import logging
 import os
+import pickle
+from typing import Any
+
+from backend.config import settings
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Short-Term Memory
+# ---------------------------------------------------------------------------
 
 
 class ShortTermMemory:
-    """Session-scoped memory for active chunk, active scene, and recent dialogue."""
+    def __init__(self, max_turns: int = 5) -> None:
+        self._max_turns: int = max_turns
+        self._dialogue_buffer: list[dict[str, Any]] = []
+        self._active_chapter: str = ""
+        self._active_scene: dict[str, Any] = {}
+        self._context: dict[str, Any] = {}
 
-    def __init__(self, max_dialogue_turns: int = 5):
-        self.active_chapter: str = ""
-        self.active_scene: dict = {}
-        self.dialogue_buffer: list[dict] = []
-        self.max_dialogue_turns = max_dialogue_turns
+    def add_turn(self, role: str, content: str) -> None:
+        self._dialogue_buffer.append({"role": role, "content": content})
+        if len(self._dialogue_buffer) > self._max_turns * 2:
+            self._dialogue_buffer = self._dialogue_buffer[-(self._max_turns * 2):]
 
-    def set_active_chapter(self, chapter_text: str):
-        self.active_chapter = chapter_text
+    def get_history(self) -> list[dict[str, Any]]:
+        return list(self._dialogue_buffer)
 
-    def set_active_scene(self, scene: dict):
-        self.active_scene = scene
+    def set_active_chapter(self, chapter: str) -> None:
+        self._active_chapter = chapter
 
-    def push_dialogue(self, turn: dict):
-        self.dialogue_buffer.append(turn)
-        if len(self.dialogue_buffer) > self.max_dialogue_turns:
-            self.dialogue_buffer.pop(0)
+    def set_active_scene(self, scene: dict[str, Any]) -> None:
+        self._active_scene = scene
 
-    def add_turn(self, character_id: str, line: str):
-        self.push_dialogue({"character_id": character_id, "line": line})
+    def get_active_chapter(self) -> str:
+        return self._active_chapter
 
-    def get_recent_turns(self, n: int = 5) -> list[dict]:
-        return self.dialogue_buffer[-n:]
+    def get_active_scene(self) -> dict[str, Any]:
+        return dict(self._active_scene)
 
-    def get_context(self) -> dict:
+    def set_context(self, key: str, value: Any) -> None:
+        self._context[key] = value
+
+    def get_context(self, key: str, default: Any = None) -> Any:
+        return self._context.get(key, default)
+
+    def clear(self) -> None:
+        self._dialogue_buffer.clear()
+        self._active_scene.clear()
+        self._context.clear()
+
+    def to_dict(self) -> dict[str, Any]:
         return {
-            "active_chapter": self.active_chapter[:500] if self.active_chapter else "",
-            "active_scene": self.active_scene,
-            "recent_dialogue": list(self.dialogue_buffer),
+            "dialogue_buffer": self._dialogue_buffer,
+            "active_chapter": self._active_chapter,
+            "active_scene": self._active_scene,
+            "context": self._context,
         }
 
-    def clear(self):
-        self.active_chapter = ""
-        self.active_scene = {}
-        self.dialogue_buffer = []
+    def from_dict(self, data: dict[str, Any]) -> None:
+        self._dialogue_buffer = data.get("dialogue_buffer", [])
+        self._active_chapter = data.get("active_chapter", "")
+        self._active_scene = data.get("active_scene", {})
+        self._context = data.get("context", {})
+
+
+# ---------------------------------------------------------------------------
+# Character Bible
+# ---------------------------------------------------------------------------
 
 
 class CharacterBible:
-    """Persistent character information store."""
+    def __init__(self) -> None:
+        self._characters: dict[str, dict[str, Any]] = {}
 
-    def __init__(self):
-        self._characters: dict[str, dict] = {}
+    def save(self, char_id: str, data: dict[str, Any]) -> None:
+        self._characters[char_id] = dict(data)
 
-    def add_or_update(self, character: dict):
-        char_id = character.get("id", character.get("name", ""))
-        self._characters[char_id] = character
-
-    def get(self, char_id: str) -> dict | None:
+    def load(self, char_id: str) -> dict[str, Any] | None:
         return self._characters.get(char_id)
 
-    def get_all(self) -> list[dict]:
-        return list(self._characters.values())
+    def get_all(self) -> dict[str, dict[str, Any]]:
+        return dict(self._characters)
 
-    def to_dict(self) -> dict:
-        return {"characters": self._characters}
+    def get_by_name(self, name: str) -> dict[str, Any] | None:
+        for char_data in self._characters.values():
+            if char_data.get("name", "").lower() == name.lower():
+                return dict(char_data)
+        return None
 
-    def from_dict(self, data: dict):
+    def remove(self, char_id: str) -> None:
+        self._characters.pop(char_id, None)
+
+    def update(self, char_id: str, updates: dict[str, Any]) -> None:
+        if char_id in self._characters:
+            self._characters[char_id].update(updates)
+        else:
+            self._characters[char_id] = dict(updates)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"characters": dict(self._characters)}
+
+    def from_dict(self, data: dict[str, Any]) -> None:
         self._characters = data.get("characters", {})
 
 
+# ---------------------------------------------------------------------------
+# World Bible
+# ---------------------------------------------------------------------------
+
+
 class WorldBible:
-    """Persistent world information store."""
+    def __init__(self) -> None:
+        self._world_rules: dict[str, Any] = {}
+        self._geography: list[dict[str, Any]] = []
 
-    def __init__(self):
-        self._rules: list[dict] = []
-        self._geography: list[dict] = []
+    def set_rule(self, rule_id: str, rule_data: dict[str, Any]) -> None:
+        self._world_rules[rule_id] = dict(rule_data)
 
-    def set_rules(self, rules: list[dict]):
-        self._rules = rules
+    def get_rule(self, rule_id: str) -> dict[str, Any] | None:
+        return self._world_rules.get(rule_id)
 
-    def set_geography(self, geography: list[dict]):
-        self._geography = geography
+    def get_all_rules(self) -> dict[str, Any]:
+        return dict(self._world_rules)
 
-    def get_rules(self) -> list[dict]:
-        return self._rules
+    def add_location(self, location: dict[str, Any]) -> None:
+        self._geography.append(dict(location))
 
-    def get_geography(self) -> list[dict]:
-        return self._geography
+    def get_locations(self) -> list[dict[str, Any]]:
+        return list(self._geography)
 
-    def get_context(self) -> dict:
-        return {"world_rules": self._rules, "geography": self._geography}
+    def get_location(self, name: str) -> dict[str, Any] | None:
+        for loc in self._geography:
+            if loc.get("name", "").lower() == name.lower():
+                return dict(loc)
+        return None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"world_rules": dict(self._world_rules), "geography": list(self._geography)}
+
+    def from_dict(self, data: dict[str, Any]) -> None:
+        self._world_rules = data.get("world_rules", {})
+        self._geography = data.get("geography", [])
+
+
+# ---------------------------------------------------------------------------
+# Semantic Memory (ChromaDB)
+# ---------------------------------------------------------------------------
 
 
 class SemanticMemory:
-    """Vector-based semantic memory using ChromaDB (primary) or sentence-transformers
-    with cosine similarity (fallback). Provides persistent RAG retrieval.
-    """
+    def __init__(self, collection_name: str = "novel2screen") -> None:
+        self._collection_name: str = collection_name
+        self._client: Any = None
+        self._collection: Any = None
+        self._embed_model: Any = None
+        self._embed_failed: bool = False
+        self._documents: list[dict[str, Any]] = []
+        self._initialized: bool = False
 
-    def __init__(self, chunk_size: int = 1500, overlap: int = 200,
-                 persist_dir: str = "./data/chroma_db", embedding_model: str = "all-MiniLM-L6-v2"):
-        self.chunk_size = chunk_size
-        self.overlap = overlap
-        self.persist_dir = persist_dir
-        self.embedding_model_name = embedding_model
-        self._chunks: list[str] = []
-        self._collection = None
-        self._embedding_fn = None
-        self._use_chromadb = False
-        self._indexed = False
-
-    def _init_chromadb(self) -> None:
-        if self._use_chromadb and self._collection is not None:
+    def _ensure_initialized(self) -> None:
+        if self._initialized:
             return
+        self._initialized = True
+        persist_dir = settings.CHROMA_PERSIST_DIR
         try:
+            os.makedirs(persist_dir, exist_ok=True)
             import chromadb
-            from chromadb.utils import embedding_functions
-            os.makedirs(self.persist_dir, exist_ok=True)
-            client = chromadb.PersistentClient(path=self.persist_dir)
-            self._embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=self.embedding_model_name,
-            )
-            self._collection = client.get_or_create_collection(
-                name="novel2screen_chunks",
-                embedding_function=self._embedding_fn,
-                metadata={"hnsw:space": "cosine"},
-            )
-            self._use_chromadb = True
-        except ImportError:
-            self._use_chromadb = False
-        except Exception:
-            self._use_chromadb = False
 
-    def chunk_text(self, text: str, source_label: str = "") -> list[dict]:
-        """Split text into overlapping chunks with metadata."""
-        words = text.split()
-        chunks = []
-        step = max(1, self.chunk_size - self.overlap)
-        for i in range(0, len(words), step):
-            chunk_text = " ".join(words[i:i + self.chunk_size])
-            if chunk_text and len(chunk_text) > 20:
-                chunks.append({
-                    "text": chunk_text,
-                    "source": source_label,
-                    "chunk_index": i // step,
-                })
+            self._client = chromadb.PersistentClient(path=persist_dir)
+            existing = [c.name for c in self._client.list_collections()]
+            if self._collection_name not in existing:
+                self._collection = self._client.create_collection(name=self._collection_name)
+            else:
+                self._collection = self._client.get_collection(name=self._collection_name)
+            logger.info("ChromaDB initialized at %s", persist_dir)
+        except Exception as e:
+            logger.warning("ChromaDB init failed, using in-memory fallback: %s", e)
+            self._client = None
+            self._collection = None
+
+        self._get_embed_fn()
+
+    def _get_embed_fn(self) -> None:
+        if self._embed_model is not None:
+            return
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            self._embed_model = SentenceTransformer(
+                settings.EMBEDDING_MODEL,
+                device="cpu",
+            )
+            logger.info("Embedding model loaded: %s", settings.EMBEDDING_MODEL)
+        except Exception as e:
+            logger.warning("Failed to load embedding model: %s", e)
+            self._embed_failed = True
+            self._embed_model = None
+
+    def _embed(self, texts: list[str]) -> list[list[float]]:
+        if self._embed_failed or self._embed_model is None:
+            return [[0.0]] * len(texts)
+        try:
+            embeddings = self._embed_model.encode(texts, convert_to_numpy=True)
+            return [emb.tolist() for emb in embeddings]
+        except Exception as e:
+            logger.warning("Embedding encode failed: %s", e)
+            self._embed_failed = True
+            return [[0.0]] * len(texts)
+
+    def chunk_text(self, text: str, chunk_size: int | None = None, overlap: int | None = None) -> list[str]:
+        if chunk_size is None:
+            chunk_size = settings.CHUNK_SIZE
+        if overlap is None:
+            overlap = settings.CHUNK_OVERLAP
+        chunks: list[str] = []
+        start = 0
+        while start < len(text):
+            end = min(start + chunk_size, len(text))
+            chunks.append(text[start:end])
+            if end >= len(text):
+                break
+            start = end - overlap
         return chunks
 
-    def index(self, text: str, source_label: str = "novel", force: bool = False):
-        """Index text into semantic memory."""
-        if self._indexed and not force:
+    def index(self, documents: list[dict[str, Any]]) -> None:
+        self._ensure_initialized()
+        self._documents = list(documents)
+        if self._collection is None or self._embed_failed:
             return
-
-        self._init_chromadb()
-        chunks_meta = self.chunk_text(text, source_label)
-
-        if not chunks_meta:
-            return
-
-        if self._use_chromadb and self._collection:
-            try:
-                existing_count = self._collection.count()
-                start_idx = existing_count
-                ids = [f"chunk_{start_idx + i}" for i in range(len(chunks_meta))]
-                documents = [c["text"] for c in chunks_meta]
-                metadatas = [{"source": c["source"], "chunk_index": c["chunk_index"]} for c in chunks_meta]
-                self._collection.add(ids=ids, documents=documents, metadatas=metadatas)
-                self._chunks = documents
-                self._indexed = True
+        try:
+            ids: list[str] = []
+            contents: list[str] = []
+            metadatas: list[dict[str, Any]] = []
+            for i, doc in enumerate(documents):
+                doc_id = doc.get("id", f"doc_{i}")
+                ids.append(doc_id)
+                contents.append(doc.get("content", doc.get("text", "")))
+                metadatas.append({k: str(v) for k, v in doc.items() if k not in ("id", "content", "text")})
+            embeddings = self._embed(contents)
+            if self._embed_failed:
                 return
-            except Exception:
-                pass
+            self._collection.upsert(ids=ids, documents=contents, metadatas=metadatas, embeddings=embeddings)
+            logger.info("Indexed %d documents into ChromaDB", len(documents))
+        except Exception as e:
+            logger.warning("ChromaDB index failed: %s", e)
 
-        self._chunks = [c["text"] for c in chunks_meta]
-        self._indexed = True
+    def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+        self._ensure_initialized()
+        if self._collection is None or self._embed_failed:
+            return self._keyword_search(query, top_k)
+        try:
+            emb = self._embed([query])
+            if self._embed_failed:
+                return self._keyword_search(query, top_k)
+            results = self._collection.query(query_embeddings=emb, n_results=top_k)
+            hits: list[dict[str, Any]] = []
+            if results and results["ids"] and results["ids"][0]:
+                for i, doc_id in enumerate(results["ids"][0]):
+                    hits.append({
+                        "id": doc_id,
+                        "content": results["documents"][0][i] if results.get("documents") else "",
+                        "metadata": results["metadatas"][0][i] if results.get("metadatas") else {},
+                        "distance": results["distances"][0][i] if results.get("distances") else 0.0,
+                    })
+            return hits
+        except Exception as e:
+            logger.warning("ChromaDB search failed, using keyword fallback: %s", e)
+            return self._keyword_search(query, top_k)
 
-    def search(self, query: str, top_k: int = 3) -> list[dict]:
-        """Search for semantically similar chunks. Uses ChromaDB if available."""
-        if not self._chunks:
-            return []
+    def retrieve_context(self, query: str, top_k: int = 3, max_chars: int = 3000) -> str:
+        results = self.search(query, top_k)
+        parts: list[str] = []
+        total = 0
+        for r in results:
+            content = r.get("content", "")
+            if total + len(content) > max_chars:
+                content = content[:max_chars - total] + "..."
+            parts.append(content)
+            total += len(content)
+            if total >= max_chars:
+                break
+        return "\n---\n".join(parts)
 
-        self._init_chromadb()
+    @staticmethod
+    def _keyword_search(query: str, top_k: int = 5) -> list[dict[str, Any]]:
+        return [{"id": "kw_fallback", "content": f"No semantic results for: {query}", "metadata": {}, "distance": 1.0}]
 
-        if self._use_chromadb and self._collection:
-            try:
-                results = self._collection.query(query_texts=[query], n_results=min(top_k, self._collection.count()))
-                if results and results.get("documents") and results["documents"][0]:
-                    docs = results["documents"][0]
-                    distances = results.get("distances", [[0] * len(docs)])[0] if results.get("distances") else [0] * len(docs)
-                    return [
-                        {"chunk": doc, "score": round(1.0 - distances[i], 4)}
-                        for i, doc in enumerate(docs)
-                    ]
-            except Exception:
-                pass
+    def jaccard_search(self, query: str, documents: list[str], top_k: int = 5) -> list[str]:
+        def _jaccard(a: set[str], b: set[str]) -> float:
+            if not a or not b:
+                return 0.0
+            return len(a & b) / len(a | b)
 
-        return self._keyword_search(query, top_k)
-
-    def _keyword_search(self, query: str, top_k: int = 3) -> list[dict]:
-        """Enhanced fallback keyword matching search.
-        Uses word-level Jaccard similarity, bigram overlap, and
-        normalized scoring for better retrieval.
-        """
-        if not self._chunks:
-            return []
-        query_lower = query.lower()
-        query_words = set(query_lower.split())
-        query_bigrams = {query_lower[i:i+2] for i in range(len(query_lower)-1)}
-        if not query_words:
-            return [{"chunk": self._chunks[0][:500], "score": 0.05}]
-        scored = []
-        for chunk in self._chunks:
-            chunk_lower = chunk.lower()
-            chunk_words = set(chunk_lower.split())
-            # Jaccard similarity on word sets
-            intersection = len(query_words & chunk_words)
-            union = len(query_words | chunk_words)
-            jaccard = intersection / max(union, 1)
-            # Bigram character overlap
-            chunk_bigrams = {chunk_lower[i:i+2] for i in range(len(chunk_lower)-1)}
-            bi_intersection = len(query_bigrams & chunk_bigrams)
-            bi_union = len(query_bigrams | chunk_bigrams)
-            bigram_score = bi_intersection / max(bi_union, 1)
-            # Combined score: weighted
-            score = 0.6 * jaccard + 0.4 * bigram_score
-            if score > 0:
-                scored.append((score, chunk))
-        if not scored:
-            return [{"chunk": self._chunks[0][:500], "score": 0.05}]
-        scored.sort(key=lambda x: x[0], reverse=True)
-        max_score = scored[0][0] if scored else 1
-        return [
-            {"chunk": chunk, "score": round(score / max(max_score, 1), 3)}
-            for score, chunk in scored[:top_k]
-        ]
-
-    def retrieve_context(self, queries: list[str], top_k: int = 3) -> str:
-        """Retrieve and format RAG context for prompt injection."""
-        if not self._chunks:
-            return ""
-        all_chunks = set()
-        for query in queries:
-            results = self.search(query, top_k=top_k)
-            for r in results:
-                all_chunks.add(r["chunk"][:800])
-        if not all_chunks:
-            return ""
-        return "\n\n---\n\n".join(f"[Context] {c}" for c in list(all_chunks)[:top_k * 2])
-
-    def get_stats(self) -> dict:
-        return {
-            "total_chunks": len(self._chunks),
-            "use_chromadb": self._use_chromadb,
-            "persist_dir": self.persist_dir,
-            "indexed": self._indexed,
-        }
+        query_set = set(query.lower().split())
+        scored = [(doc, _jaccard(query_set, set(doc.lower().split()))) for doc in documents]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [s[0] for s in scored[:top_k]]
 
 
-def hash_yaml(yaml_str: str) -> str:
-    return hashlib.sha256(yaml_str.encode("utf-8")).hexdigest()
-
-
-def verify_yaml_against_facts(screenplay_yaml: str, facts: dict | None = None, facts_text: str = "") -> dict:
-    """Verify screenplay YAML against extracted facts from the novel.
-
-    Checks character names, locations, and plot elements against
-    the original novel content to detect hallucinated or inconsistent content.
-
-    Returns a dict with:
-    - score: float (0.0-1.0)
-    - character_issues: list[str]
-    - location_issues: list[str]
-    - plot_issues: list[str]
-    """
-    import yaml
-    result = {
-        "score": 1.0,
-        "character_issues": [],
-        "location_issues": [],
-        "plot_issues": [],
-    }
-    try:
-        data = yaml.safe_load(screenplay_yaml) if screenplay_yaml else {}
-    except Exception:
-        result["score"] = 0.0
-        result["plot_issues"].append("Invalid YAML")
-        return result
-    if not isinstance(data, dict):
-        result["score"] = 0.5
-        result["plot_issues"].append("Empty or non-dict YAML")
-        return result
-    facts_lower = facts_text.lower() if facts_text else ""
-    if not facts_lower:
-        result["score"] = 0.5
-        return result
-    # Check character names against facts
-    placeholder_names = {"protagonist", "antagonist", "character", "hero", "villain", "narrator"}
-    for c in data.get("characters", []):
-        name = c.get("name", "") if isinstance(c, dict) else ""
-        if not name or len(name) < 2:
-            continue
-        if name.lower() in placeholder_names:
-            result["character_issues"].append(
-                "Character " + repr(name) + " (" + str(c.get("id", "")) + ") looks like a placeholder")
-            continue
-        if name.lower() not in facts_lower:
-            result["character_issues"].append(
-                "Character " + repr(name) + " (" + str(c.get("id", "")) + ") not found in facts")
-    # Check locations against facts
-    for ep in data.get("episodes", []):
-        for sc in ep.get("scenes", []):
-            loc = sc.get("location", "") if isinstance(sc, dict) else ""
-            if loc and len(loc) > 2 and loc.lower() not in facts_lower:
-                result["location_issues"].append(
-                    "Location " + repr(loc) + " in scene " + str(sc.get("scene_id", "?")) + " not found in facts")
-    # Calculate score
-    total_issues = (
-        len(result["character_issues"])
-        + len(result["location_issues"])
-        + len(result["plot_issues"])
-    )
-    result["score"] = max(0.0, 1.0 - total_issues * 0.15)
-    return result
+# ---------------------------------------------------------------------------
+# Memory Manager
+# ---------------------------------------------------------------------------
 
 
 class MemoryManager:
-    """Central memory orchestrator combining short-term, long-term, and semantic memory."""
+    def __init__(self) -> None:
+        self.stm = ShortTermMemory()
+        self.characters = CharacterBible()
+        self.world = WorldBible()
+        self.semantic = SemanticMemory()
+        self._store: dict[str, Any] = {}
 
-    def __init__(self, stm: ShortTermMemory, char_bible: CharacterBible,
-                 world_bible: WorldBible, sem_mem: SemanticMemory | None = None):
-        self.stm = stm
-        self.char_bible = char_bible
-        self.world_bible = world_bible
-        self.sem_mem = sem_mem
+    def set(self, key: str, value: Any) -> None:
+        self._store[key] = value
 
-    def get_context(self, chapter: int = 0, scene: str = "", query: str = "") -> dict:
-        """Build context for LLM calls from all memory sources."""
-        context = {
-            "active_chapter": self.stm.active_chapter,
-            "active_scene": self.stm.active_scene,
-            "recent_dialogue": self.stm.get_recent_turns(5),
-            "characters": self.char_bible.get_all(),
-        }
-        if self.world_bible:
-            context["world_rules"] = self.world_bible.get_rules()
-            context["geography"] = self.world_bible.get_geography()
-        if self.sem_mem and query:
-            context["semantic_hits"] = self.sem_mem.search(query, top_k=3)
-        return context
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._store.get(key, default)
 
-    def update_chapter(self, chapter: str):
-        self.stm.active_chapter = chapter
+    def delete(self, key: str) -> None:
+        self._store.pop(key, None)
 
-    def update_scene(self, scene: str):
-        self.stm.active_scene = scene
-
-    def add_dialogue_turn(self, character_id: str, line: str):
-        self.stm.add_turn(character_id, line)
-
-    def detect_changes(self, original_state, edited_state):
-        """Detect changes between original and edited screenplay."""
-        changes = []
-        try:
-            original_eps = original_state.get("episodes", []) if isinstance(original_state, dict) else []
-            edited_eps = edited_state.get("episodes", []) if isinstance(edited_state, dict) else []
-            min_len = min(len(original_eps), len(edited_eps))
-            for i in range(min_len):
-                o = original_eps[i]
-                e = edited_eps[i]
-                if o.get("title") != e.get("title"):
-                    changes.append({"type": "episode_title", "episode": i, "old": o.get("title"), "new": e.get("title")})
-                o_scenes = o.get("scenes", [])
-                e_scenes = e.get("scenes", [])
-                for j in range(min(len(o_scenes), len(e_scenes))):
-                    if o_scenes[j].get("location") != e_scenes[j].get("location"):
-                        changes.append({"type": "scene_location", "episode": i, "scene": j,
-                                        "old": o_scenes[j].get("location"), "new": e_scenes[j].get("location")})
-        except Exception:
-            pass
+    def detect_changes(self, old_state: dict[str, Any], new_state: dict[str, Any]) -> list[str]:
+        changes: list[str] = []
+        all_keys = set(old_state.keys()) | set(new_state.keys())
+        for key in all_keys:
+            old_val = old_state.get(key)
+            new_val = new_state.get(key)
+            if old_val != new_val:
+                changes.append(key)
         return changes
 
-    def get_alignment_report(self, original_novel_chunks, screenplay_yaml):
-        """Compare original novel to screenplay and produce alignment report."""
-        import yaml
-        report = {
-            "alignment_score": 0.0,
-            "character_count_match": False,
-            "plot_points_covered": [],
-            "deviations": [],
+    def save(self, filepath: str) -> None:
+        data: dict[str, Any] = {
+            "stm": self.stm.to_dict(),
+            "characters": self.characters.to_dict(),
+            "world": self.world.to_dict(),
+            "store": dict(self._store),
         }
+        os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
+        with open(filepath, "wb") as f:
+            pickle.dump(data, f)
+        logger.info("Memory state saved to %s", filepath)
+
+    def load(self, filepath: str) -> bool:
+        if not os.path.exists(filepath):
+            return False
         try:
-            screenplay = yaml.safe_load(screenplay_yaml)
-            if not screenplay:
-                return report
-            sc_chars = {c.get("name", "") for c in screenplay.get("characters", [])}
-            report["character_count_match"] = len(sc_chars) > 0
-            score = 0.5
-            if len(sc_chars) >= 2:
-                score += 0.2
-            if len(screenplay.get("episodes", [])) >= 2:
-                score += 0.2
-            report["alignment_score"] = round(min(score, 1.0), 2)
-        except Exception:
-            pass
-        return report
-
-    def persist_all(self):
-        """Persist long-term memory to disk."""
-        out_dir = os.path.join(os.path.dirname(__file__), "..", "data")
-        os.makedirs(out_dir, exist_ok=True)
-        char_file = os.path.join(out_dir, "char_bible.json")
-        world_file = os.path.join(out_dir, "world_bible.json")
-        with open(char_file, "w", encoding="utf-8") as f:
-            json.dump(self.char_bible.get_all(), f, ensure_ascii=False, indent=2)
-        with open(world_file, "w", encoding="utf-8") as f:
-            json.dump({"rules": self.world_bible.get_rules(), "geography": self.world_bible.get_geography()},
-                      f, ensure_ascii=False, indent=2)
-
-    def load_all(self):
-        """Load long-term memory from disk."""
-        out_dir = os.path.join(os.path.dirname(__file__), "..", "data")
-        char_file = os.path.join(out_dir, "char_bible.json")
-        world_file = os.path.join(out_dir, "world_bible.json")
-        if os.path.exists(char_file):
-            with open(char_file, encoding="utf-8") as f:
-                data = json.load(f)
-                for c in (data if isinstance(data, list) else [data]):
-                    self.char_bible.add_or_update(c)
-        if os.path.exists(world_file):
-            with open(world_file, encoding="utf-8") as f:
-                data = json.load(f)
-                self.world_bible.set_rules(data.get("rules", []))
-                self.world_bible.set_geography(data.get("geography", []))
+            with open(filepath, "rb") as f:
+                data = pickle.load(f)
+            self.stm.from_dict(data.get("stm", {}))
+            self.characters.from_dict(data.get("characters", {}))
+            self.world.from_dict(data.get("world", {}))
+            self._store = data.get("store", {})
+            logger.info("Memory state loaded from %s", filepath)
+            return True
+        except Exception as e:
+            logger.warning("Failed to load memory state: %s", e)
+            return False

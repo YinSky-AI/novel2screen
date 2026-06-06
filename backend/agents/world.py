@@ -1,57 +1,54 @@
-"""WorldAgent - Extracts world-building elements. Used in long mode only."""
-import json
+from __future__ import annotations
 
-from ..core.llm import llm_client
-from ..core.prompts import WORLD_SYSTEM, WORLD_USER
-from ..schemas.models import WorldOutput
-from .base import AgentBase
+from typing import Any
+
+from backend.agents.base import AgentBase
 
 
 class WorldAgent(AgentBase):
-    """Extracts world rules, magic systems, technology, politics, and geography."""
+    def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        novel_text: str = input_data.get("novel_text", "")
 
-    def __init__(self, model: str = "gpt-4o-mini"):
-        super().__init__(name="WorldAgent", model=model)
+        query = novel_text[:3000]
+        system_prompt = "You are a world-building specialist for screen adaptations. Output valid JSON only."
 
-    def run(self, input_data: dict) -> dict:
-        content = input_data.get("content", "")
-        if not content:
-            content = "\n\n".join(input_data.get("chunks", []))
+        base_prompt = f"""Analyze the following novel excerpt and extract world-building details:
 
-        response = llm_client.complete(
-            system_prompt=WORLD_SYSTEM,
-            user_prompt=WORLD_USER.format(content=content),
-            model=self.model,
-            temperature=0.3,
-        )
+1. **locations**: Array of objects, each with:
+   - name: Location name
+   - description: What the location looks and feels like
+   - significance: Why this location matters to the story
+   - visual_suggestions: How to film this location
+2. **world_rules**: Array of objects describing special rules, magic systems, technology, or social norms:
+   - rule: The rule or system
+   - implications: How it affects the story
+   - visual_representation: How to show it on screen
+3. **atmosphere**: Overall world atmosphere
 
-        return self._parse_response(response)
+Novel excerpt:
+{novel_text[:5000]}
 
+Output ONLY a JSON object. No markdown, no explanation."""
 
-    def _parse_response(self, text: str) -> dict:
-        import re
-        text = text.strip()
-        text = re.sub(r"`(?:json)?\s*", "", text)
-        text = re.sub(r"\s*`", "", text)
-        text = text.strip()
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                return json.loads(match.group())
-            raise
+        prompt = self._build_rag_prompt(base_prompt, query)
 
-    def validate(self, output: dict) -> bool:
-        try:
-            WorldOutput(**output)
-            return True
-        except Exception:
-            return False
+        if self._retry_errors:
+            prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
 
-    def get_default_context(self) -> dict:
-        """Return default world context for short mode."""
-        return {
-            "world_rules": [{"domain": "general", "description": "Real-world setting with no supernatural elements"}],
-            "geography": [],
-        }
+        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.5)
+        return self._parse_json(response)
+
+    def validate(self, output: dict[str, Any]) -> bool:
+        has_locations = isinstance(output.get("locations"), list) and len(output["locations"]) > 0
+        has_rules = isinstance(output.get("world_rules"), list)
+        return has_locations or has_rules
+
+    def validate_with_errors(self, output: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        if not isinstance(output.get("locations"), list):
+            errors.append("locations must be a list")
+        if not isinstance(output.get("world_rules"), list):
+            errors.append("world_rules must be a list")
+        if not output.get("locations") and not output.get("world_rules"):
+            errors.append("At least locations or world_rules must be non-empty")
+        return errors

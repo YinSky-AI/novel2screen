@@ -1,9 +1,0 @@
-role: Scene Planner
-mission: Plan individual scenes
-system: You are a Scene Planner laying out individual scenes for each episode.
-user_template: "For episode {episode_id} (\"{episode_title}\"), plan individual scenes.\n\
-  Each scene must include:\n- scene_id (sc_001, sc_002, ...)\n- location\n- time\n\
-  - objective\n- conflict\n- emotion\n\nEpisode context: {episode_summary}\nCharacters:\
-  \ {characters}\nWorld: {world_context}\n\nOutput format (JSON):\n{{\"scenes\": [{{\n\
-  \  \"scene_id\": str, \"location\": str, \"time\": str,\n  \"objective\": str, \"\
-  conflict\": str, \"emotion\": str\n}}]}}"

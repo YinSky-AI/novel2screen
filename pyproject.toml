@@ -6,36 +6,7 @@ target-version = "py312"
 select = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
-"backend/*" = [
-    "D100", "D101", "D102", "D103", "D104", "D105", "D107", "D200", "D204", "D205", "D212",
-    "ANN001", "ANN002", "ANN201", "ANN202", "ANN204", "ANN401",
-    "E501", "C901", "PLR2004", "PLR0911", "PLR0912", "PLR0913", "PLR0915",
-    "PLC0415", "TID252", "TRY003", "EM102", "BLE001",
-    "FBT001", "FBT002", "S110", "TRY300",
-    "PTH118", "PTH120", "PTH123", "PTH103", "PTH110",
-    "RUF001", "RUF003", "ARG001", "ARG002", "ARG003", "ARG004", "ARG005",
-    "ISC001", "COM812", "Q000", "SIM108", "SIM115",
-    "S101", "S104", "S113", "S310",
-    "T20",
-  ]
-"tests/*" = [
-    "RUF001", "RUF002",
-    "SLF001", "D205", "E501",
-    "PTH118", "PTH120",
-
-    "S101", "ANN001", "ANN201", "D100", "D101", "D102", "D103", "D104", "D107",
-    "PLR2004", "PLR0913", "ARG001", "ARG002", "ARG003", "ARG004", "ARG005",
-    "T20", "B017", "PT011", "RUF059",
-  ]
-"backend/config.py" = ["ERA001"]
-"backend/core/llm.py" = ["E722", "N806", "PERF401"]
-"backend/core/memory.py" = ["PERF401"]
-"backend/core/router.py" = ["RUF012", "S311"]
-"backend/main.py" = ["PTH112", "PTH113", "PTH122", "ASYNC240", "PLW0603"]
-"backend/harness/orchestrator.py" = ["TRY301", "SIM401"]
-"backend/harness/output_validator.py" = ["RUF002", "F811"]
-"backend/harness/novel_reader.py" = ["PERF401"]
-
+"tests/*" = ["S101", "ANN001", "ANN201", "D100", "D101", "D102", "D103", "D104", "D107", "PLR2004", "PLR0913", "ARG001", "ARG002", "ARG003", "ARG004", "ARG005", "T20"]
 
 [tool.mypy]
 strict = true
@@ -44,7 +15,3 @@ python_version = "3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-[tool.coverage.run]
-source = ["backend"]
-omit = ["tests/*", "*/__pycache__/*"]

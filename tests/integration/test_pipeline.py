@@ -1,168 +1,282 @@
-"""Integration tests for Novel2Screen pipelines.
-Tests fast_run and run with real (but small) novel texts using demo mode.
-"""
-import os
-import sys
+from __future__ import annotations
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+import json
+import uuid
+from typing import Any
+from unittest.mock import MagicMock
 
-from backend.core.memory import CharacterBible, MemoryManager, SemanticMemory, ShortTermMemory, WorldBible
-from backend.core.preprocessor import preprocess_novel
-from backend.workflows.novel2screen import Novel2ScreenWorkflow, parse_and_segment, route_mode
+import pytest
 
-THREE_CHAPTER_NOVEL = """
-第一章 初入江湖
-
-夜雨潇潇，打在青石板路上发出清脆的响声。李云飞裹紧蓑衣，快步走进路边的客栈。
-客栈大堂里只有三两个客人。一个白发老者在角落里自斟自饮，见他进来，微微抬头看了一眼。
-
-"客官打尖还是住店？"掌柜的满脸堆笑。
-
-"住店，一间上房。"李云飞从怀中摸出一块碎银放在柜台上。
-
-第二章 恩怨情仇
-
-第二天清晨，李云飞刚下楼，就看见昨天那个白发老者还坐在原来的位置。
-"年轻人，你师傅的死，另有隐情。"老者突然开口，声音不大却清晰入耳。
-
-李云飞脚步一顿，缓缓转过身："前辈认识我师傅？"
-
-"何止认识。"老者叹了口气，"三十年前，我和你师傅一起在华山论剑。他输给了我，但真正害死他的，是'青冥教'的人。"
-
-第三章 决战前夕
-
-李云飞握紧手中的剑，指尖因用力而发白。他知道自己必须找到真相。
-
-沿着老者给的线索，他来到了城外的一座废弃庙宇。月黑风高，远处隐约传来兵器碰撞的声音。
-
-"来得正好。"黑暗中走出一个黑衣人，"李云飞，你师傅死得不冤。他在查的事，你也不该知道。"
-
-李云飞缓缓拔剑："今天，我就替师傅讨个公道。"
-"""
+from backend.harness.orchestrator import PipelineOrchestrator, PipelineState, build_fast_pipeline, build_full_pipeline, state_to_response
+from backend.schemas.models import Screenplay
+from backend.schemas.validator import _DEMO_SCREENPLAY_YAML, screenplay_to_yaml, validate_screenplay_yaml, yaml_to_screenplay
+from backend.workflows.novel2screen import Novel2ScreenWorkflow
 
 
-class TestParseAndRoute:
-    def test_chapter_parsing(self):
-        chunks = parse_and_segment(THREE_CHAPTER_NOVEL)
-        assert len(chunks) >= 3
+# ---------------------------------------------------------------------------
+# Mock LLM that returns valid stage-appropriate JSON
+# ---------------------------------------------------------------------------
 
-    def test_route_mode_short(self):
-        assert route_mode(3) == "short"
-        assert route_mode(10) == "short"
+_MOCK_CHARACTERS_JSON = json.dumps({
+    "characters": [
+        {"id": "char_001", "name": "Hero", "role": "protagonist", "goal": "Win", "fear": "Lose", "arc": "Growth", "voice_style": "bold"},
+        {"id": "char_002", "name": "Villain", "role": "antagonist", "goal": "Destroy", "fear": "Nothing", "arc": "Fall", "voice_style": "cold"},
+    ],
+}, ensure_ascii=False)
 
-    def test_route_mode_long(self):
-        assert route_mode(11) == "long"
-        assert route_mode(100) == "long"
-
-    def test_no_chapter_markers(self):
-        chunks = parse_and_segment("This is a plain text without any chapter markers.\n\nJust paragraphs here.\n\nMore content to split.")
-        assert len(chunks) >= 1
-
-
-class TestSemanticMemory:
-    def test_index_and_search(self):
-        sem = SemanticMemory(chunk_size=500, overlap=100, persist_dir="./data/test_chroma")
-        sem.index(THREE_CHAPTER_NOVEL, source_label="test")
-        results = sem.search("李云飞 师傅", top_k=3)
-        assert len(results) >= 1
-        assert any("李云飞" in r["chunk"] for r in results)
-
-    def test_retrieve_context(self):
-        sem = SemanticMemory(chunk_size=500, overlap=100, persist_dir="./data/test_chroma")
-        sem.index(THREE_CHAPTER_NOVEL, source_label="test")
-        context = sem.retrieve_context(["李云飞", "师傅", "仇人"], top_k=3)
-        assert len(context) > 0
-
-    def test_keyword_fallback(self):
-        sem = SemanticMemory(chunk_size=500, overlap=100, persist_dir="./data/test_chroma")
-        sem._chunks = ["李云飞走进客栈", "老者在角落", "剑客握紧手中的剑"]
-        sem._indexed = True
-        results = sem.search("剑客 手中的", top_k=2)
-        assert len(results) >= 1
-
-    def test_empty_search(self):
-        sem = SemanticMemory()
-        results = sem.search("anything")
-        assert results == []
+_MOCK_EPISODE_PLANNER_JSON = json.dumps({
+    "episodes": [
+        {"id": "ep_001", "title": "Pilot", "summary": "Start", "key_events": ["e1"], "characters_featured": ["Hero"], "emotional_arc": "Hope", "cliffhanger": "???"},
+        {"id": "ep_002", "title": "Rising", "summary": "Conflict", "key_events": ["e2"], "characters_featured": ["Hero", "Villain"], "emotional_arc": "Tension", "cliffhanger": "!!!"},
+    ],
+    "season_arc": "Hero wins",
+}, ensure_ascii=False)
 
 
-class TestMemoryManager:
-    def test_full_memory_stack(self):
-        stm = ShortTermMemory()
-        cb = CharacterBible()
-        wb = WorldBible()
-        sem = SemanticMemory(chunk_size=500, persist_dir="./data/test_chroma")
-        sem.index(THREE_CHAPTER_NOVEL, "test")
+def _mock_llm_chat(messages: list[dict[str, str]], *, model: str = "", temperature: float = 0.7, **kwargs: Any) -> str:
+    full = " ".join(m.get("content", "") for m in messages)
 
-        mm = MemoryManager(stm=stm, char_bible=cb, world_bible=wb, sem_mem=sem)
+    if "timeline of events for screenplay" in full:
+        return json.dumps({
+            "events": [
+                {"order": 1, "description": "Start", "characters_involved": ["Hero"], "location": "Home", "emotional_beat": "Hope", "estimated_screen_time": 5},
+                {"order": 2, "description": "Conflict", "characters_involved": ["Hero", "Villain"], "location": "City", "emotional_beat": "Tension", "estimated_screen_time": 10},
+            ],
+            "timeline_type": "linear",
+            "major_turning_points": ["The betrayal"],
+        }, ensure_ascii=False)
 
-        cb.add_or_update({"id": "char_001", "name": "李云飞", "role": "protagonist", "goal": "复仇"})
-        stm.add_turn("char_001", "今天，我就替师傅讨个公道。")
+    if "Plan a TV series adaptation" in full:
+        return _MOCK_EPISODE_PLANNER_JSON
 
-        ctx = mm.get_context(query="师傅 仇人")
-        assert len(ctx["characters"]) >= 1
-        assert len(ctx["recent_dialogue"]) >= 1
-        assert "char_001" in str(ctx["recent_dialogue"])
-        assert "semantic_hits" in ctx
+    if "Plan individual scenes for episode" in full:
+        return json.dumps({
+            "episode_id": "ep_001",
+            "scenes": [
+                {"scene_id": "sc_001", "location": "Home", "time": "Morning", "visual_focus": "Window", "sound_effect": "Wind", "voice_over": None, "transition": "cut", "duration_estimate": 60,
+                 "beats": [{"type": "dialogue", "character_id": "char_001", "content": "Hello", "emotion": "hopeful"}]},
+            ],
+        }, ensure_ascii=False)
 
-    def test_persist_and_load(self):
-        stm = ShortTermMemory()
-        cb = CharacterBible()
-        wb = WorldBible()
-        mm = MemoryManager(stm=stm, char_bible=cb, world_bible=wb)
+    if "character analyst" in full or "identify all characters" in full:
+        return _MOCK_CHARACTERS_JSON
 
-        cb.add_or_update({"id": "char_001", "name": "Test", "role": "protagonist"})
-        wb.set_rules([{"domain": "magic", "description": "Test"}])
+    if "world-building" in full or "world-building specialist" in full:
+        return json.dumps({"locations": [{"name": "Home", "description": "A room", "significance": "Start", "visual_suggestions": "Warm light"}], "world_rules": [], "atmosphere": "Cozy"}, ensure_ascii=False)
 
-        mm.persist_all()
+    if "narrative structure" in full or "screenplay analyst" in full:
+        return json.dumps({"title": "Test", "logline": "A test story.", "genre": "Drama", "theme": "Testing", "core_conflict": "Hero vs Villain", "tone": "Dark", "target_audience": "All", "style_notes": "Cinematic"}, ensure_ascii=False)
 
-        cb2 = CharacterBible()
-        wb2 = WorldBible()
-        mm2 = MemoryManager(stm=ShortTermMemory(), char_bible=cb2, world_bible=wb2)
-        mm2.load_all()
+    if "Score each category" in full or "Quality assessment" in full:
+        return json.dumps({"score": 8.0, "issues": [], "suggestions": [], "overall_assessment": "Good"}, ensure_ascii=False)
 
-        assert len(cb2.get_all()) >= 1
-        assert len(wb2.get_rules()) >= 1
+    if "repaired_yaml" in full or "Repair the following" in full:
+        return json.dumps({"repaired_yaml": "title: Test", "changes_made": [], "validation_passed": True}, ensure_ascii=False)
 
+    if "consistency" in full.lower() or "Compare the edited screenplay" in full:
+        return json.dumps({"consistent": True, "issues": [], "resolved": True}, ensure_ascii=False)
 
-class TestPreprocessor:
-    def test_preprocess_demo_mode(self):
-        chapters = parse_and_segment(THREE_CHAPTER_NOVEL)
-        result = preprocess_novel(chapters, mode="short")
-        assert "theme" in result
-        assert "major_events" in result
-        assert "characters" in result
-        assert len(result["major_events"]) >= 1
-        assert len(result["characters"]) >= 1
+    return "{}"
 
 
-class TestWorkflow:
-    def test_fast_run_demo(self):
-        wf = Novel2ScreenWorkflow()
-        state = wf.fast_run(
-            novel_text=THREE_CHAPTER_NOVEL,
-            novel_title="江湖风雨录",
-            genre="xuanhuan",
+class MockLLM:
+    def __init__(self) -> None:
+        self._chat = _mock_llm_chat
+
+    def chat(self, messages: list[dict[str, str]], *, model: str = "", temperature: float = 0.7, **kwargs: Any) -> str:
+        return self._chat(messages, model=model, temperature=temperature, **kwargs)
+
+    def extract_json(self, text: str) -> dict[str, Any]:
+        return json.loads(text) if text.strip() else {}
+
+    def repair_json(self, text: str) -> str:
+        return text
+
+
+class MockSettings:
+    CHUNK_SIZE = 1500
+    CHUNK_OVERLAP = 200
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+class TestFastPipelineDemo:
+    def test_fast_pipeline_demo(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "backend.workflows.novel2screen.smart_chunk",
+            lambda text, chunk_size=1500, overlap=200: [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)],
         )
-        assert state.get("completed") is True
-        assert len(state.get("screenplay_yaml", "")) > 100
+        llm = MockLLM()
+        memory = MagicMock()
+        memory.semantic = MagicMock()
+        memory.semantic.index_chunks = MagicMock()
 
-    def test_run_demo(self):
-        wf = Novel2ScreenWorkflow()
-        state = wf.run(
-            novel_text=THREE_CHAPTER_NOVEL,
-            novel_title="江湖风雨录",
-            genre="xuanhuan",
-        )
-        assert state.get("completed") is True
-        assert state.get("critic_score", 0) >= 0
-        yaml_content = state.get("screenplay_yaml", "")
-        assert len(yaml_content) > 50
+        wf = Novel2ScreenWorkflow(MockSettings(), llm, memory)
+        novel_text = "程序员林峰是一名普通的软件工程师。一天深夜，他在公司加班时发现了代码的秘密。"
 
-    def test_consistency_check(self):
-        wf = Novel2ScreenWorkflow()
-        report = wf.run_consistency_check(
-            novel_chunks=parse_and_segment(THREE_CHAPTER_NOVEL),
-            screenplay_yaml="title: Test\nlogline: L\ngenre: Drama\ntheme: T",
+        result = wf.fast_run(novel_text, mode="auto")
+
+        assert result.status == "completed"
+        assert result.task_id.startswith("task_")
+        assert len(result.yaml_content) > 0
+        assert "title" in result.yaml_content.lower()
+
+    def test_full_pipeline_demo(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "backend.workflows.novel2screen.smart_chunk",
+            lambda text, chunk_size=1500, overlap=200: [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)],
         )
-        assert "alignment_score" in report
+        llm = MockLLM()
+        memory = MagicMock()
+        memory.semantic = MagicMock()
+        memory.semantic.index_chunks = MagicMock()
+        memory.semantic.retrieve_context = MagicMock(return_value="")
+
+        wf = Novel2ScreenWorkflow(MockSettings(), llm, memory)
+        novel_text = "程序员林峰发现代码能改变现实。"
+
+        result = wf.run(novel_text, mode="auto")
+
+        assert result.status == "completed"
+        assert len(result.yaml_content) > 0
+
+    def test_demo_screenplay_valid(self) -> None:
+        report = validate_screenplay_yaml(_DEMO_SCREENPLAY_YAML)
+        assert report.valid
+        assert len(report.errors) == 0
+
+    def test_roundtrip(self) -> None:
+        sp = yaml_to_screenplay(_DEMO_SCREENPLAY_YAML)
+        yaml_str = screenplay_to_yaml(sp)
+        sp2 = yaml_to_screenplay(yaml_str)
+
+        assert sp2.title == sp.title
+        assert len(sp2.characters) == len(sp.characters)
+        assert len(sp2.episodes) == len(sp.episodes)
+
+        for orig_ep, round_ep in zip(sp.episodes, sp2.episodes):
+            assert round_ep.id == orig_ep.id
+            assert len(round_ep.scenes) == len(orig_ep.scenes)
+
+    def test_demo_yaml_parse_roundtrip_validates(self) -> None:
+        sp = yaml_to_screenplay(_DEMO_SCREENPLAY_YAML)
+        yaml_str = screenplay_to_yaml(sp)
+        report = validate_screenplay_yaml(yaml_str)
+        assert report.valid
+
+    def test_orchestrator_build_fast_pipeline_state(self) -> None:
+        llm = MockLLM()
+        memory = MagicMock()
+        memory.semantic = MagicMock()
+
+        from backend.agents.narrative import NarrativeAgent
+        from backend.agents.character import CharacterAgent
+        from backend.agents.world import WorldAgent
+        from backend.agents.timeline import TimelineAgent
+        from backend.agents.episode_planner import EpisodePlannerAgent
+        from backend.agents.scene_planner import ScenePlannerAgent
+
+        agents = {
+            "narrative": NarrativeAgent(llm, memory),
+            "character": CharacterAgent(llm, memory),
+            "world": WorldAgent(llm, memory),
+            "timeline": TimelineAgent(llm, memory),
+            "episode_planner": EpisodePlannerAgent(llm, memory),
+            "scene_planner": ScenePlannerAgent(llm, memory),
+        }
+
+        orchestrator = PipelineOrchestrator(agents)
+        state = PipelineState(novel_text="程序员林峰的故事。")
+        state = build_fast_pipeline(orchestrator, state)
+
+        assert state.screenplay is not None
+        assert isinstance(state.screenplay, Screenplay)
+        assert len(state.screenplay.episodes) > 0
+
+    def test_orchestrator_build_full_pipeline_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from backend.agents.narrative import NarrativeAgent
+        from backend.agents.character import CharacterAgent
+        from backend.agents.world import WorldAgent
+        from backend.agents.timeline import TimelineAgent
+        from backend.agents.episode_planner import EpisodePlannerAgent
+        from backend.agents.scene_planner import ScenePlannerAgent
+        from backend.agents.critic import CriticAgent
+        from backend.agents.repair import RepairAgent
+        from backend.agents.consistency import ConsistencyAgent
+
+        class FullMockLLM:
+            def chat(self, messages: list[dict[str, str]], *, model: str = "", temperature: float = 0.7, **kwargs: Any) -> str:
+                return _mock_llm_chat(messages, model=model, temperature=temperature, **kwargs)
+
+            def extract_json(self, text: str) -> dict[str, Any]:
+                return json.loads(text) if text.strip() else {}
+
+            def repair_json(self, text: str) -> str:
+                return text
+
+        llm = FullMockLLM()
+        memory = MagicMock()
+        memory.semantic = MagicMock()
+        memory.semantic.retrieve_context = MagicMock(return_value="")
+
+        agents = {
+            "narrative": NarrativeAgent(llm, memory),
+            "character": CharacterAgent(llm, memory),
+            "world": WorldAgent(llm, memory),
+            "timeline": TimelineAgent(llm, memory),
+            "episode_planner": EpisodePlannerAgent(llm, memory),
+            "scene_planner": ScenePlannerAgent(llm, memory),
+            "critic": CriticAgent(llm, memory),
+            "repair": RepairAgent(llm, memory),
+            "consistency": ConsistencyAgent(llm, memory),
+        }
+
+        orchestrator = PipelineOrchestrator(agents)
+        state = PipelineState(novel_text="程序员林峰的故事。")
+        state = build_full_pipeline(orchestrator, state)
+
+        assert state.screenplay is not None
+        assert len(state.episodes_plan.get("episodes", [])) > 0
+        assert "consistent" in state.consistency
+
+    def test_state_to_response(self) -> None:
+        state = PipelineState(
+            novel_text="test",
+            yaml_content="title: Test",
+            screenplay=Screenplay(title="Test", logline="A test", genre="Drama", theme="Test"),
+        )
+        response = state_to_response(state, "task_123")
+        assert response.task_id == "task_123"
+        assert response.status == "completed"
+        assert response.yaml_content == "title: Test"
+
+    def test_state_to_response_with_errors(self) -> None:
+        state = PipelineState(
+            novel_text="test",
+            errors=["Something went wrong"],
+        )
+        response = state_to_response(state, "task_456")
+        assert response.status == "error"
+        assert "Something went wrong" in response.message
+
+    def test_workflow_import_edits(self) -> None:
+        wf = Novel2ScreenWorkflow(MockSettings(), MockLLM(), MagicMock())
+        result = wf.import_edits("test_task", _DEMO_SCREENPLAY_YAML)
+        assert result["task_id"] == "test_task"
+        assert result["status"] in ("validated", "repaired", "validation_failed")
+
+    def test_workflow_save_export(self, tmp_path: Any) -> None:
+        import os
+        original_dir = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            wf = Novel2ScreenWorkflow(MockSettings(), MockLLM(), MagicMock())
+            filepath = wf.save_export("task_export", _DEMO_SCREENPLAY_YAML)
+            assert os.path.exists(filepath)
+            with open(filepath, encoding="utf-8") as f:
+                content = f.read()
+            assert "命运之轮" in content
+        finally:
+            os.chdir(original_dir)

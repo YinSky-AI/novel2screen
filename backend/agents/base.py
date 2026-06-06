@@ -1,78 +1,89 @@
-﻿"""Agent base class for Novel2Screen.
-Every agent implements run(), validate(), and retry().
-"""
+from __future__ import annotations
+
+import json
+import re
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-
-
-class AgentError(Exception):
-    """Base exception for agent failures."""
-
+from typing import Any
 
 
 class AgentBase(ABC):
-    """Abstract base class for all Novel2Screen agents."""
+    def __init__(self, llm_client: Any, memory_manager: Any) -> None:
+        self.llm = llm_client
+        self.memory = memory_manager
+        self._rag_enabled = True
+        self._rag_top_k = 5
+        self._retry_errors: list[str] = []
+        self._previous_output: dict[str, Any] | None = None
 
-    def __init__(self, name: str, model: str = "", max_retries: int = 2):
-        self.name = name
-        self.model = model
-        self.max_retries = max_retries
-        self.attempt_count = 0
+    @abstractmethod
+    def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+    @abstractmethod
+    def validate(self, output: dict[str, Any]) -> bool:
+        ...
+
+    def validate_with_errors(self, output: dict[str, Any]) -> list[str]:
+        if self.validate(output):
+            return []
+        return ["Output failed validation"]
+
+    def retry(self, input_data: dict[str, Any], max_attempts: int = 2) -> dict[str, Any]:
+        for attempt in range(max_attempts):
+            result = self.run(input_data)
+            if self.validate(result):
+                return result
+            self._retry_errors = self.validate_with_errors(result)
+            self._previous_output = result
+        return self._previous_output or {}
+
+    def _retrieve_context(self, query: str, top_k: int | None = None) -> list[str]:
+        k = top_k if top_k is not None else self._rag_top_k
         try:
-            from ..core.router import ModelRouter
-            self.router = ModelRouter()
+            return self.memory.semantic.retrieve_context(query, top_k=k)
         except Exception:
-            self.router = None
+            return []
 
-    @abstractmethod
-    def run(self, input_data: dict) -> dict:
-        """Execute the agent's core logic.
-        Must return a dict conforming to the agent's output schema.
-        """
-
-    @abstractmethod
-    def validate(self, output: dict) -> bool:
-        """Validate the agent's output against its schema.
-        Returns True if valid, False otherwise.
-        """
-
-    def retry(self, input_data: dict, validation_fn: Callable[[dict], bool] | None = None) -> dict:
-        """Run the agent with retry logic.
-        Re-runs up to max_retries if validation fails.
-        """
-        last_error = None
-        for attempt in range(self.max_retries + 1):
-            self.attempt_count = attempt + 1
-            try:
-                output = self.run(input_data)
-
-                # Use instance validate() or provided validation_fn
-                is_valid = (validation_fn or self.validate)(output)
-                if is_valid:
-                    return output
-
-                last_error = f"Validation failed on attempt {attempt + 1}"
-            except Exception as e:
-                last_error = f"Error on attempt {attempt + 1}: {e}"
-
-        raise AgentError(
-            f"Agent '{self.name}' failed after {self.max_retries + 1} attempts. "
-            f"Last error: {last_error}",
+    def _build_rag_prompt(self, base_prompt: str, query: str) -> str:
+        if not self._rag_enabled:
+            return base_prompt
+        contexts = self._retrieve_context(query)
+        if not contexts:
+            return base_prompt
+        context_block = "\n\n".join(f"[Reference {i + 1}]\n{c}" for i, c in enumerate(contexts))
+        return (
+            "The following are reference excerpts from the source novel. Use them for "
+            "grounding and factual accuracy:\n\n"
+            f"{context_block}\n\n"
+            "---\n\n"
+            f"{base_prompt}"
         )
 
-    def get_llm_response(self, system_prompt: str, user_prompt: str,
-                          temperature: float = 0.3) -> str:
-        """Route LLM call through ModelRouter if available."""
-        if self.router:
-            agent_key = self.name.replace("Agent", "").lower()
-            return self.router.execute(agent_key, system_prompt, user_prompt, temperature)
-        from ..core.llm import llm_client
-        return llm_client.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            model=self.model,
-            temperature=temperature,
-        )
+    def _call_llm(
+        self, prompt: str, *, system_prompt: str = "", model: str = "", temperature: float = 0.7
+    ) -> str:
+        messages: list[dict[str, str]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        return self.llm.chat(messages, model=model, temperature=temperature)
 
-    def get_attempt_count(self) -> int:
-        return self.attempt_count
+    def _parse_json(self, response: str) -> dict[str, Any]:
+        return self.llm.extract_json(response)
+
+    def _repair_json(self, text: str) -> str:
+        return self.llm.repair_json(text)
+
+    def _extract_json_from_text(self, text: str) -> dict[str, Any]:
+        text = text.strip()
+        fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+        if fence_match:
+            text = fence_match.group(1).strip()
+        brace_match = re.search(r"\{.*\}", text, re.DOTALL)
+        if brace_match:
+            text = brace_match.group(0)
+        text = self._repair_json(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            raise ValueError(f"Could not parse JSON from response: {text[:200]}")
