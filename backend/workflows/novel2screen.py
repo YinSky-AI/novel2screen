@@ -53,44 +53,18 @@ class Novel2ScreenWorkflow:
         try:
             narrative = self._narrative.retry({"novel_text": novel_text})
             character_result = self._character.retry({"novel_text": novel_text})
-
-            # Build basic episodes from major_events
             chars_raw = character_result.get("characters", []) if isinstance(character_result, dict) else []
-            episodes = []
-            events = narrative.get("major_events", []) if isinstance(narrative, dict) else []
-            ep_scenes = []
-            if events:
-                for i, ev in enumerate(events):
-                    if not isinstance(ev, dict):
-                        continue
-                    ep_scenes.append({
-                        "scene_id": f"sc_{(i+1):03d}",
-                        "location": str(ev.get("location", "Unknown")),
-                        "time": "Day",
-                        "transition": "cut",
-                        "duration_estimate": "60s",
-                        "beats": [{
-                            "type": "action",
-                            "content": str(ev.get("event", ev.get("description", "Scene"))),
-                            "emotion": None,
-                        }],
-                    })
-            if not ep_scenes:
-                ep_scenes = [{
-                    "scene_id": "sc_001",
-                    "location": "Unknown",
-                    "time": "Day",
-                    "transition": "cut",
-                    "duration_estimate": "60s",
-                    "beats": [{"type": "action", "content": str(narrative.get("logline", narrative.get("theme", "Scene"))) if isinstance(narrative, dict) else "Scene", "emotion": None}],
-                }]
 
-            episodes.append({
+            # Step 3: LLM writes actual scenes with dialogue beats
+            events = narrative.get("major_events", []) if isinstance(narrative, dict) else []
+            ep_scenes = self._llm_write_scenes(novel_text, events, chars_raw)
+
+            episodes = [{
                 "id": "ep_001",
                 "title": narrative.get("title", "Episode 1") if isinstance(narrative, dict) else "Episode 1",
                 "summary": narrative.get("logline", "") if isinstance(narrative, dict) else "",
                 "scenes": ep_scenes,
-            })
+            }]
 
             screenplay = self._build_screenplay({
                 "narrative": narrative,
@@ -104,6 +78,64 @@ class Novel2ScreenWorkflow:
         except Exception:
             logger.exception("fast_run failed")
             return {"task_id": task_id, "yaml_content": "", "status": "failed"}
+
+    def _llm_write_scenes(self, novel_text: str, events: list, characters: list) -> list[dict]:
+        """Have LLM write proper screenplay scenes from narrative events."""
+        import json as _json
+        events_str = _json.dumps(events[:10], ensure_ascii=False)
+        chars_str = _json.dumps([{"id": c.get("id", ""), "name": c.get("name", "")} for c in characters[:10] if isinstance(c, dict)], ensure_ascii=False)
+
+        prompt = f"""Write complete screenplay scenes based on these events and characters.
+For EACH event, write a vivid scene with:
+- scene_id: "sc_001", "sc_002", etc.
+- location: EXACT specific location from the text (NEVER "Unknown")
+- time: specific time like "Night", "Dawn", "Midnight", "Afternoon" (NEVER just "Day")
+- visual_focus: what the camera focuses on
+- sound_effect: ambient or specific sounds
+- transition: varied — use "cut", "fade", "dissolve", "wipe" appropriately
+- duration_estimate: match scene complexity — "30s", "60s", "120s", "180s"
+- beats: at least 3 beats per scene, mixing dialogue/action/reaction types
+  - Each dialogue beat MUST have a character_id matching the characters list
+  - Each beat MUST have an emotion (e.g. "tension", "fear", "anger", "hope", "sadness", "joy", "neutral")
+  - Write specific, vivid beat content — not generic summaries
+
+Events: {events_str}
+Characters: {chars_str}
+Original text excerpt (for reference): {novel_text[:2000]}
+
+Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
+
+        try:
+            response = self._narrative._call_llm(prompt, system_prompt="You are a professional screenwriter. Write specific, cinematic scenes using exact details from the source text. Never use generic values like 'Unknown' or 'Day'. Output valid JSON only.")
+            result = self._narrative._parse_json(response)
+            scenes = result.get("scenes", [])
+            if scenes and isinstance(scenes, list):
+                return scenes
+        except Exception as e:
+            logger.warning("LLM scene generation failed: %s, using fallback", e)
+
+        # Ultimate fallback
+        fallback = []
+        for i, ev in enumerate(events):
+            if not isinstance(ev, dict):
+                continue
+            fallback.append({
+                "scene_id": f"sc_{(i+1):03d}",
+                "location": str(ev.get("location", "Unknown")),
+                "time": str(ev.get("time", "Day")),
+                "visual_focus": str(ev.get("visual_focus", "")),
+                "sound_effect": str(ev.get("sound_effect", "")),
+                "transition": "cut",
+                "duration_estimate": "90s",
+                "beats": [
+                    {"type": "action", "content": str(ev.get("event", "Scene")), "character_id": None, "emotion": str(ev.get("emotion", "neutral"))},
+                    {"type": "dialogue", "content": "...", "character_id": (characters[0].get("id", "") if characters else ""), "emotion": str(ev.get("emotion", "neutral"))},
+                    {"type": "reaction", "content": "...", "character_id": None, "emotion": str(ev.get("emotion", "neutral"))},
+                ],
+            })
+        if not fallback:
+            fallback = [{"scene_id": "sc_001", "location": "Unknown", "time": "Day", "transition": "cut", "duration_estimate": "60s", "beats": [{"type": "action", "content": "Scene", "emotion": "neutral"}]}]
+        return fallback
 
     def run(self, novel_text: str, mode: str = "auto") -> dict[str, Any]:
         task_id = f"task_{uuid.uuid4().hex[:12]}"
