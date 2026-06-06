@@ -129,8 +129,11 @@ class TestE2EPipeline:
         wf = Novel2ScreenWorkflow(MockSettings(), MockLLMClient(), _make_memory())
         result = wf.fast_run(SAMPLE_CN)
         assert result["status"] == "completed"
-        assert len(result["yaml_content"]) > 0
-        assert "title" in result["yaml_content"].lower()
+        yaml_content = result["yaml_content"]
+        assert "scenes:" in yaml_content
+        assert "sc_001" in yaml_content
+        assert "scenes: []" not in yaml_content
+        assert "title" in yaml_content.lower()
 
     def test_fast_pipeline_english_novel(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from backend.workflows.novel2screen import Novel2ScreenWorkflow
@@ -143,8 +146,11 @@ class TestE2EPipeline:
         wf = Novel2ScreenWorkflow(MockSettings(), MockLLMClient(), _make_memory())
         result = wf.fast_run(SAMPLE_EN)
         assert result["status"] == "completed"
-        assert len(result["yaml_content"]) > 0
-        assert "title" in result["yaml_content"].lower()
+        yaml_content = result["yaml_content"]
+        assert "scenes:" in yaml_content
+        assert "sc_001" in yaml_content
+        assert "scenes: []" not in yaml_content
+        assert "title" in yaml_content.lower()
 
     def test_full_pipeline(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from backend.workflows.novel2screen import Novel2ScreenWorkflow

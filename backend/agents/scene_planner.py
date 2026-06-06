@@ -7,6 +7,7 @@ from backend.agents.base import AgentBase
 SYSTEM_PROMPT = """You are a scene planner for screenplays.
 IMPORTANT: Base all scenes on content explicitly present in the source text. Do NOT fabricate scenes, characters, or locations.
 Respond in the same language as the input text.
+Every scene MUST include scene_id, location, time, objective, conflict, emotion, transition: "cut", duration_estimate: "60s".
 Output ONLY valid JSON, no markdown, no explanation."""
 
 

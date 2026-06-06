@@ -58,29 +58,39 @@ class Novel2ScreenWorkflow:
             chars_raw = character_result.get("characters", []) if isinstance(character_result, dict) else []
             episodes = []
             events = narrative.get("major_events", []) if isinstance(narrative, dict) else []
+            ep_scenes = []
             if events:
-                ep_scenes = []
                 for i, ev in enumerate(events):
                     if not isinstance(ev, dict):
                         continue
                     ep_scenes.append({
                         "scene_id": f"sc_{(i+1):03d}",
-                        "location": ev.get("location", "Unknown"),
+                        "location": str(ev.get("location", "Unknown")),
                         "time": "Day",
+                        "transition": "cut",
+                        "duration_estimate": "60s",
                         "beats": [{
                             "type": "action",
-                            "content": ev.get("event", ev.get("description", "")),
+                            "content": str(ev.get("event", ev.get("description", "Scene"))),
                             "emotion": None,
                         }],
-                        "transition": "cut",
-                        "duration_estimate": "45s",
                     })
-                episodes.append({
-                    "id": "ep_001",
-                    "title": narrative.get("title", "Episode 1"),
-                    "summary": narrative.get("logline", ""),
-                    "scenes": ep_scenes,
-                })
+            if not ep_scenes:
+                ep_scenes = [{
+                    "scene_id": "sc_001",
+                    "location": "Unknown",
+                    "time": "Day",
+                    "transition": "cut",
+                    "duration_estimate": "60s",
+                    "beats": [{"type": "action", "content": str(narrative.get("logline", narrative.get("theme", "Scene"))) if isinstance(narrative, dict) else "Scene", "emotion": None}],
+                }]
+
+            episodes.append({
+                "id": "ep_001",
+                "title": narrative.get("title", "Episode 1") if isinstance(narrative, dict) else "Episode 1",
+                "summary": narrative.get("logline", "") if isinstance(narrative, dict) else "",
+                "scenes": ep_scenes,
+            })
 
             screenplay = self._build_screenplay({
                 "narrative": narrative,
@@ -228,8 +238,16 @@ class Novel2ScreenWorkflow:
             scenes_raw = ep.get("scenes", [])
             if isinstance(scenes_raw, dict):
                 scenes_raw = scenes_raw.get("scenes", [])
-            if not isinstance(scenes_raw, list):
-                scenes_raw = []
+            if not isinstance(scenes_raw, list) or len(scenes_raw) == 0:
+                scenes_raw = [{
+                    "scene_id": "sc_001",
+                    "location": "Unknown",
+                    "time": "Day",
+                    "transition": "cut",
+                    "duration_estimate": "60s",
+                    "beats": [{"type": "action", "content": ep.get("summary", "Scene")}],
+                }]
+
             scenes = []
             for sc in scenes_raw:
                 if not isinstance(sc, dict):
@@ -237,34 +255,46 @@ class Novel2ScreenWorkflow:
                 beats_raw = sc.get("beats", [])
                 if not isinstance(beats_raw, list):
                     beats_raw = []
+                if len(beats_raw) == 0:
+                    beats_raw = [{"type": "action", "content": sc.get("objective", sc.get("summary", "Scene")), "emotion": None}]
                 beats = []
                 for b in beats_raw:
                     if not isinstance(b, dict):
-                        beats_raw = []
-                        break
+                        continue
                     try:
                         bt = BeatType(b.get("type", "action"))
                     except ValueError:
                         bt = BeatType.ACTION
-                    beats.append(Beat(type=bt, character_id=b.get("character_id"), content=b.get("content", ""), emotion=b.get("emotion")))
-                if not beats and data.get("characters"):
+                    beats.append(Beat(
+                        type=bt,
+                        character_id=b.get("character_id"),
+                        content=b.get("content", ""),
+                        emotion=b.get("emotion"),
+                    ))
+                if not beats:
                     beats = [Beat(type=BeatType.ACTION, content=f"Scene at {sc.get('location', 'unknown')}", emotion=None)]
+
                 try:
                     tr = Transition(sc.get("transition", "cut"))
                 except ValueError:
                     tr = Transition.CUT
+
                 scenes.append(Scene(
-                    scene_id=sc.get("scene_id", f"sc_{(len(scenes)+1):03d}"),
-                    location=sc.get("location", ""),
-                    time=sc.get("time", ""),
+                    scene_id=str(sc.get("scene_id", f"sc_{(len(scenes)+1):03d}")),
+                    location=str(sc.get("location", "Unknown")),
+                    time=str(sc.get("time", "Day")),
+                    visual_focus=sc.get("visual_focus"),
+                    sound_effect=sc.get("sound_effect"),
+                    voice_over=sc.get("voice_over"),
                     beats=beats,
                     transition=tr,
-                    duration_estimate=sc.get("duration_estimate", "30s"),
+                    duration_estimate=str(sc.get("duration_estimate", "60s")),
                 ))
+
             episodes.append(Episode(
-                id=ep.get("id", f"ep_{(len(episodes)+1):03d}"),
-                title=ep.get("title", ""),
-                summary=ep.get("summary", ""),
+                id=str(ep.get("id", f"ep_{(len(episodes)+1):03d}")),
+                title=str(ep.get("title", "")),
+                summary=str(ep.get("summary", "")),
                 scenes=scenes,
             ))
 
