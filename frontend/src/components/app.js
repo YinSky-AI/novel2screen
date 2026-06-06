@@ -2,6 +2,7 @@ import {
   API_BASE,
   convertNovelText,
   uploadNovelFile,
+  generateScreenplay,
   getTaskStatus,
   exportYaml,
   importEdits,

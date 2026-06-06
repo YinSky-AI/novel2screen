@@ -9,17 +9,17 @@ from backend.core.llm import LLMClient
 logger = logging.getLogger(__name__)
 
 _AGENT_MODEL_MAP: dict[str, str] = {
-    "Narrative": "claude-3-haiku-20240307",
-    "Character": "gpt-3.5-turbo",
-    "World": "claude-3-sonnet-20240229",
-    "ScenePlanner": "gpt-4-turbo",
-    "Dialogue": "claude-3-haiku-20240307",
-    "Critic": "gpt-4-turbo",
-    "Repair": "gpt-3.5-turbo",
-    "Consistency": "claude-3-haiku-20240307",
-    "Preprocess": "claude-3-sonnet-20240229",
-    "BatchPlan": "gpt-4-turbo",
-    "Timeline": "claude-3-haiku-20240307",
+    "Narrative": "deepseek-chat",
+    "Character": "deepseek-chat",
+    "World": "deepseek-chat",
+    "ScenePlanner": "deepseek-chat",
+    "Dialogue": "deepseek-chat",
+    "Critic": "deepseek-chat",
+    "Repair": "deepseek-chat",
+    "Consistency": "deepseek-chat",
+    "Preprocess": "deepseek-chat",
+    "BatchPlan": "deepseek-chat",
+    "Timeline": "deepseek-chat",
 }
 
 
