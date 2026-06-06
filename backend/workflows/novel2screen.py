@@ -36,9 +36,9 @@ class Novel2ScreenWorkflow:
         self._repair = RepairAgent(llm_client, memory_manager)
         self._consistency = ConsistencyAgent(llm_client, memory_manager)
 
-    def parse_and_segment(self, text: str) -> list[dict[str, str | int]]:
-        reader = NovelReader(text)
-        return reader.get_chapters()
+    def parse_and_segment(self, text: str) -> list[str]:
+        from backend.core.preprocessor import parse_chapters
+        return parse_chapters(text)
 
     def _init_semantic_memory(self, novel_text: str) -> None:
         chunks = self.memory_manager.semantic.chunk_text(novel_text)
@@ -47,67 +47,77 @@ class Novel2ScreenWorkflow:
         self.memory_manager.semantic.index(chunks)
         logger.info("Indexed %d chunks into semantic memory", len(chunks))
 
-    def fast_run(self, novel_text: str, mode: str = "auto") -> ConvertResponse:
+    def fast_run(self, novel_text: str, mode: str = "auto") -> dict[str, Any]:
         task_id = f"task_{uuid.uuid4().hex[:12]}"
+        logger.info("fast_run | task_id=%s", task_id)
         self._init_semantic_memory(novel_text)
 
-        state = PipelineState(
-            novel_text=novel_text,
-            language=NovelReader(novel_text).language,
-            chunks=smart_chunk(novel_text),
-            progress=0.0,
-        )
+        try:
+            narrative = self._narrative.run({"chunks": [novel_text]})
+            character_result = self._character.run({"chunks": [novel_text]})
+            world_result = self._world.run({"chunks": [novel_text]})
 
-        agents = {
-            "narrative": self._narrative,
-            "character": self._character,
-            "world": self._world,
-            "timeline": self._timeline,
-            "episode_planner": self._episode_planner,
-            "scene_planner": self._scene_planner,
-            "critic": self._critic,
-            "repair": self._repair,
-            "consistency": self._consistency,
-        }
+            screenplay = self._build_screenplay({
+                "narrative": narrative,
+                "characters": character_result,
+                "world": world_result,
+                "episodes": [],
+            })
+            yaml_content = screenplay_to_yaml(screenplay)
 
-        orchestrator = PipelineOrchestrator(agents)
-        state = build_fast_pipeline(orchestrator, state)
+            return {"task_id": task_id, "yaml_content": yaml_content, "status": "completed"}
+        except Exception:
+            logger.exception("fast_run | task_id=%s | failed", task_id)
+            return {"task_id": task_id, "yaml_content": "", "status": "failed"}
 
-        if state.screenplay:
-            state.yaml_content = screenplay_to_yaml(state.screenplay)
-
-        return state_to_response(state, task_id)
-
-    def run(self, novel_text: str, mode: str = "auto") -> ConvertResponse:
+    def run(self, novel_text: str, mode: str = "auto") -> dict[str, Any]:
         task_id = f"task_{uuid.uuid4().hex[:12]}"
+        logger.info("run | task_id=%s", task_id)
         self._init_semantic_memory(novel_text)
 
-        state = PipelineState(
-            novel_text=novel_text,
-            language=NovelReader(novel_text).language,
-            chunks=smart_chunk(novel_text),
-            progress=0.0,
-        )
+        try:
+            narrative = self._narrative.retry({"chunks": [novel_text]})
+            character_result = self._character.retry({"chunks": [novel_text]})
+            world_result = self._world.run({"chunks": [novel_text]})
+            timeline = self._timeline.run({"chunks": [novel_text], "mode": mode})
 
-        agents = {
-            "narrative": self._narrative,
-            "character": self._character,
-            "world": self._world,
-            "timeline": self._timeline,
-            "episode_planner": self._episode_planner,
-            "scene_planner": self._scene_planner,
-            "critic": self._critic,
-            "repair": self._repair,
-            "consistency": self._consistency,
-        }
+            ep_plan = self._episode_planner.run({
+                "narrative": narrative,
+                "characters": character_result,
+                "mode": mode,
+                "num_episodes": 4,
+            })
+            episodes_data = ep_plan.get("episodes", [])
 
-        orchestrator = PipelineOrchestrator(agents)
-        state = build_full_pipeline(orchestrator, state)
+            assembled: list[dict[str, Any]] = []
+            for ep in episodes_data:
+                ep_id = ep.get("id", "ep_001")
+                scenes = self._scene_planner.run({
+                    "episode_id": ep_id,
+                    "summary": ep.get("summary", ""),
+                    "characters": character_result.get("characters", []),
+                })
+                ep["scenes"] = scenes.get("scenes", [])
+                assembled.append(ep)
 
-        if state.screenplay and not state.yaml_content:
-            state.yaml_content = screenplay_to_yaml(state.screenplay)
+            screenplay = self._build_screenplay({
+                "narrative": narrative,
+                "characters": character_result,
+                "world": world_result,
+                "episodes": assembled,
+            })
+            yaml_content = screenplay_to_yaml(screenplay)
 
-        return state_to_response(state, task_id)
+            critic = self._critic.run({"yaml_content": yaml_content, "fast": False})
+            violations = critic.get("violations", [])
+            if violations:
+                repair = self._repair.run({"yaml_content": yaml_content, "violations": violations})
+                yaml_content = repair.get("repaired_yaml", yaml_content)
+
+            return {"task_id": task_id, "yaml_content": yaml_content, "status": "completed"}
+        except Exception:
+            logger.exception("run | task_id=%s | failed", task_id)
+            return {"task_id": task_id, "yaml_content": "", "status": "failed"}
 
     def _build_screenplay(self, data: dict[str, Any]) -> Screenplay:
         if "characters" in data:

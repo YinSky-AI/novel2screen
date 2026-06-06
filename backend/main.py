@@ -121,15 +121,17 @@ async def generate_screenplay(
         lambda: wf.fast_run(novel_text, "auto") if pipeline == "fast" else wf.run(novel_text, "auto"),
     )
 
+    status = result.get("status", "completed")
+    yaml_content = result.get("yaml_content", "")
     _task_store[task_id].update({
-        "status": result.status if result.status != "error" else "completed",
+        "status": status,
         "progress": 100.0,
-        "current_stage": result.status,
-        "output": result.yaml_content,
-        "yaml_content": result.yaml_content,
+        "current_stage": status,
+        "output": yaml_content,
+        "yaml_content": yaml_content,
     })
 
-    return result
+    return ConvertResponse(task_id=task_id, status=status, yaml_content=yaml_content)
 
 
 @app.get("/tasks/{task_id}", response_model=TaskStatus)
@@ -274,16 +276,17 @@ async def convert_novel(request: Request) -> ConvertResponse:
         lambda: wf.fast_run(novel_text, "auto") if pipeline == "fast" else wf.run(novel_text, "auto"),
     )
 
+    status = result.get("status", "completed")
+    yaml_content = result.get("yaml_content", "")
     _task_store[task_id].update({
-        "status": "completed",
+        "status": status,
         "progress": 100.0,
         "current_stage": "Complete",
-        "output": result.yaml_content,
-        "yaml_content": result.yaml_content,
+        "output": yaml_content,
+        "yaml_content": yaml_content,
     })
 
-    result.task_id = task_id
-    return result
+    return ConvertResponse(task_id=task_id, status=status, yaml_content=yaml_content)
 
 
 class FileConvertRequest(BaseModel):
@@ -315,16 +318,17 @@ async def convert_novel_file(request: FileConvertRequest) -> ConvertResponse:
         else wf.run(request.content, request.mode),
     )
 
+    status = result.get("status", "completed")
+    yaml_content = result.get("yaml_content", "")
     _task_store[task_id].update({
-        "status": "completed",
+        "status": status,
         "progress": 100.0,
         "current_stage": "Complete",
-        "output": result.yaml_content,
-        "yaml_content": result.yaml_content,
+        "output": yaml_content,
+        "yaml_content": yaml_content,
     })
 
-    result.task_id = task_id
-    return result
+    return ConvertResponse(task_id=task_id, status=status, yaml_content=yaml_content)
 
 
 @app.post("/validate", response_model=ValidateResponse)
