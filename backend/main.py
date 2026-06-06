@@ -112,7 +112,7 @@ async def generate_screenplay(
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
         None,
-        lambda: wf.fast_run(novel_text, mode) if pipeline == "fast" else wf.run(novel_text, mode),
+        lambda: wf.fast_run(novel_text, "auto") if pipeline == "fast" else wf.run(novel_text, "auto"),
     )
 
     _task_store[task_id].update({
@@ -209,14 +209,21 @@ async def get_alignment(task_id: str) -> AlignmentResponse:
     )
 
 
-@app.post("/convert", response_model=ConvertResponse)
-async def convert_novel(request: dict[str, Any]) -> ConvertResponse:
-    novel_text = request.get("novel_text", "")
-    if not novel_text:
-        raise HTTPException(status_code=400, detail="novel_text is required")
+class ConvertRequest(BaseModel):
+    novel_text: str
+    pipeline: str = "fast"
+    language: str = "auto"
+    model_config = {"extra": "ignore"}
 
-    mode = request.get("mode", "auto")
-    pipeline = request.get("pipeline", "full")
+
+class ValidateRequest(BaseModel):
+    yaml_content: str
+
+
+@app.post("/convert", response_model=ConvertResponse)
+async def convert_novel(body: ConvertRequest) -> ConvertResponse:
+    novel_text = body.novel_text
+    pipeline = body.pipeline
 
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     _task_store[task_id] = {
@@ -228,10 +235,9 @@ async def convert_novel(request: dict[str, Any]) -> ConvertResponse:
     }
 
     wf = _get_workflow()
-
     loop = asyncio.get_event_loop()
 
-    if mode == "demo":
+    if pipeline == "demo":
         _task_store[task_id].update({
             "status": "completed",
             "progress": 100.0,
@@ -248,7 +254,7 @@ async def convert_novel(request: dict[str, Any]) -> ConvertResponse:
 
     result = await loop.run_in_executor(
         None,
-        lambda: wf.fast_run(novel_text, mode) if pipeline == "fast" else wf.run(novel_text, mode),
+        lambda: wf.fast_run(novel_text, "auto") if pipeline == "fast" else wf.run(novel_text, "auto"),
     )
 
     _task_store[task_id].update({
