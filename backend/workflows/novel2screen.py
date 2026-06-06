@@ -53,9 +53,9 @@ class Novel2ScreenWorkflow:
         self._init_semantic_memory(novel_text)
 
         try:
-            narrative = self._narrative.run({"chunks": [novel_text]})
-            character_result = self._character.run({"chunks": [novel_text]})
-            world_result = self._world.run({"chunks": [novel_text]})
+            narrative = self._narrative.run({"novel_text": novel_text})
+            character_result = self._character.run({"novel_text": novel_text})
+            world_result = self._world.run({"novel_text": novel_text})
 
             screenplay = self._build_screenplay({
                 "narrative": narrative,
@@ -76,10 +76,10 @@ class Novel2ScreenWorkflow:
         self._init_semantic_memory(novel_text)
 
         try:
-            narrative = self._narrative.retry({"chunks": [novel_text]})
-            character_result = self._character.retry({"chunks": [novel_text]})
-            world_result = self._world.run({"chunks": [novel_text]})
-            timeline = self._timeline.run({"chunks": [novel_text], "mode": mode})
+            narrative = self._narrative.retry({"novel_text": novel_text})
+            character_result = self._character.retry({"novel_text": novel_text})
+            world_result = self._world.run({"novel_text": novel_text})
+            timeline = self._timeline.run({"novel_text": novel_text, "mode": mode})
 
             ep_plan = self._episode_planner.run({
                 "narrative": narrative,
@@ -120,6 +120,24 @@ class Novel2ScreenWorkflow:
             return {"task_id": task_id, "yaml_content": "", "status": "failed"}
 
     def _build_screenplay(self, data: dict[str, Any]) -> Screenplay:
+        narrative = data.get("narrative", {})
+        if not isinstance(narrative, dict):
+            narrative = {"theme": str(narrative)}
+
+        title = narrative.get("title", "") or narrative.get("theme", "Untitled")
+        logline = narrative.get("logline", "") or "A story unfolds."
+        theme = narrative.get("theme", "")
+        genre = narrative.get("genre", "drama")
+
+        world = data.get("world", {})
+        if isinstance(world, dict):
+            rules = world.get("world_rules", world)
+            if isinstance(rules, dict):
+                if rules.get("magic"):
+                    genre = "fantasy"
+                elif rules.get("technology"):
+                    genre = "sci-fi"
+
         chars_raw = data.get("characters", [])
         if isinstance(chars_raw, dict):
             chars_raw = chars_raw.get("characters", [])
@@ -127,45 +145,96 @@ class Novel2ScreenWorkflow:
             chars_raw = []
 
         from backend.schemas.models import Character, CharacterRole
-        characters = [
-            Character(
+
+        characters = []
+        for i, c in enumerate(chars_raw):
+            if not isinstance(c, dict):
+                continue
+            role_str = c.get("role", "supporting")
+            try:
+                role_enum = CharacterRole(role_str)
+            except ValueError:
+                role_enum = CharacterRole.SUPPORTING
+            characters.append(Character(
                 id=c.get("id", f"char_{(i+1):03d}"),
                 name=c.get("name", ""),
-                role=CharacterRole(c.get("role", "supporting")),
+                role=role_enum,
                 goal=c.get("goal", ""),
                 fear=c.get("fear", ""),
                 arc=c.get("arc", ""),
                 voice_style=c.get("voice_style", ""),
-            )
-            for i, c in enumerate(chars_raw)
-            if isinstance(c, dict)
-        ]
+            ))
 
-        narrative = data.get("narrative", {})
-        if isinstance(narrative, dict):
-            title = narrative.get("title", narrative.get("theme", "Untitled"))
-            theme = narrative.get("theme", "")
-            major_events = narrative.get("major_events", [])
-            logline = ". ".join(e.get("event", e.get("name", "")) for e in (major_events if isinstance(major_events, list) else [])[:3]) or "A story unfolds."
-        else:
-            title = "Untitled"
-            theme = ""
-            logline = ""
+        episodes_raw = data.get("episodes", [])
+        if isinstance(episodes_raw, dict):
+            episodes_raw = episodes_raw.get("episodes", [])
+        if not isinstance(episodes_raw, list):
+            episodes_raw = []
 
-        world = data.get("world", {})
-        genre = "drama"
-        if isinstance(world, dict):
-            rules = world.get("world_rules", world)
-            if isinstance(rules, dict) and rules.get("magic"):
-                genre = "fantasy"
+        from backend.schemas.models import Episode, Scene, Beat, BeatType, Transition
 
+        episodes = []
+        for ep_data in episodes_raw:
+            if not isinstance(ep_data, dict):
+                continue
+            scenes_raw = ep_data.get("scenes", [])
+            if isinstance(scenes_raw, dict):
+                scenes_raw = scenes_raw.get("scenes", [])
+            if not isinstance(scenes_raw, list):
+                scenes_raw = []
+
+            scenes = []
+            for sc_data in scenes_raw:
+                if not isinstance(sc_data, dict):
+                    continue
+                beats_raw = sc_data.get("beats", [])
+                if not isinstance(beats_raw, list):
+                    beats_raw = []
+                beats = []
+                for b_data in beats_raw:
+                    if not isinstance(b_data, dict):
+                        continue
+                    try:
+                        bt = BeatType(b_data.get("type", "action"))
+                    except ValueError:
+                        bt = BeatType.ACTION
+                    beats.append(Beat(
+                        type=bt,
+                        character_id=b_data.get("character_id"),
+                        content=b_data.get("content", ""),
+                        emotion=b_data.get("emotion"),
+                    ))
+                try:
+                    trans = Transition(sc_data.get("transition", "cut"))
+                except ValueError:
+                    trans = Transition.CUT
+                scenes.append(Scene(
+                    scene_id=sc_data.get("scene_id", f"sc_{(len(scenes)+1):03d}"),
+                    location=sc_data.get("location", ""),
+                    time=sc_data.get("time", ""),
+                    visual_focus=sc_data.get("visual_focus"),
+                    sound_effect=sc_data.get("sound_effect"),
+                    voice_over=sc_data.get("voice_over"),
+                    beats=beats,
+                    transition=trans,
+                    duration_estimate=sc_data.get("duration_estimate", "30s"),
+                ))
+
+            episodes.append(Episode(
+                id=ep_data.get("id", f"ep_{(len(episodes)+1):03d}"),
+                title=ep_data.get("title", ""),
+                summary=ep_data.get("summary", ""),
+                scenes=scenes,
+            ))
+
+        logger.info("_build_screenplay | title=%s | chars=%d | eps=%d", title, len(characters), len(episodes))
         return Screenplay(
             title=title,
             logline=logline,
             genre=genre,
             theme=theme,
             characters=characters,
-            episodes=[],
+            episodes=episodes,
         )
 
     def run_consistency_check(self, original_chunks: list[str], edited_yaml: str) -> dict[str, Any]:
