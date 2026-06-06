@@ -436,11 +436,11 @@ async function pollTask() {
 }
 
 function updateProgress(data) {
-  const pct = data.progress != null ? data.progress : 0;
-  dom.progressFill.style.width = Math.min(100, Math.max(0, pct)) + '%';
+  const pct = data.progress != null ? data.progress : 5;
+  dom.progressFill.style.width = Math.min(100, Math.max(5, pct)) + '%';
   dom.progressPercent.textContent = Math.round(pct) + '%';
 
-  const stage = data.stage || data.current_stage || '';
+  const stage = data.current_stage || data.stage || '';
   if (stage) {
     dom.progressStage.textContent = stage;
   } else if (pct < 30) {

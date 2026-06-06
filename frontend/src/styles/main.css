@@ -429,6 +429,7 @@ body {
 }
 
 .progress-bar-fill {
+  min-width: 6%;
   height: 100%;
   background: linear-gradient(90deg, var(--color-orange), var(--color-orange-light));
   border-radius: var(--radius-full);

@@ -99,8 +99,8 @@ async def upload_novel(file: UploadFile = File(...)) -> UploadResponse:
 @app.post("/generate/{task_id}", response_model=ConvertResponse)
 async def generate_screenplay(
     task_id: str,
-    mode: str = Query("auto", description="Generation mode: auto, fast, full"),
-    pipeline: str = Query("full", description="Pipeline type: fast, full"),
+    mode: str = Query("auto"),
+    pipeline: str = Query("full"),
 ) -> ConvertResponse:
     if task_id not in _task_store:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -110,28 +110,12 @@ async def generate_screenplay(
     if not novel_text:
         raise HTTPException(status_code=400, detail="No novel text found in task")
 
-    wf = _get_workflow()
     _task_store[task_id]["status"] = "processing"
-    _task_store[task_id]["progress"] = 0.0
-    _task_store[task_id]["current_stage"] = "Starting..."
+    _task_store[task_id]["progress"] = 10.0
+    _task_store[task_id]["current_stage"] = "正在分析..."
 
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        None,
-        lambda: wf.fast_run(novel_text, "auto") if pipeline == "fast" else wf.run(novel_text, "auto"),
-    )
-
-    status = result.get("status", "completed")
-    yaml_content = result.get("yaml_content", "")
-    _task_store[task_id].update({
-        "status": status,
-        "progress": 100.0,
-        "current_stage": status,
-        "output": yaml_content,
-        "yaml_content": yaml_content,
-    })
-
-    return ConvertResponse(task_id=task_id, status=status, yaml_content=yaml_content)
+    asyncio.create_task(_run_generation(task_id, novel_text, mode, pipeline))
+    return ConvertResponse(task_id=task_id, status="generating")
 
 
 @app.get("/tasks/{task_id}", response_model=TaskStatus)
@@ -361,3 +345,54 @@ async def detect_novel_language(body: dict[str, Any]) -> DetectLanguageResponse:
         raise HTTPException(status_code=400, detail="No text provided")
     lang = detect_language(text)
     return DetectLanguageResponse(language=lang, confidence=0.95)
+
+
+async def _run_generation(task_id: str, novel_text: str, mode: str, pipeline: str) -> None:
+    wf = _get_workflow()
+    stages = []
+    if pipeline == "fast":
+        stages = [
+            (15, "正在分析叙事结构..."),
+            (35, "正在提取角色..."),
+            (60, "正在构建剧本..."),
+            (90, "正在生成YAML..."),
+        ]
+    else:
+        stages = [
+            (10, "正在分析叙事结构..."),
+            (20, "正在提取角色信息..."),
+            (30, "正在分析世界观..."),
+            (40, "正在组织时间线..."),
+            (50, "正在规划剧集..."),
+            (60, "正在规划场景..."),
+            (70, "正在编写对话..."),
+            (80, "正在质量评审..."),
+            (90, "正在生成YAML..."),
+        ]
+
+    for progress, stage in stages:
+        _task_store[task_id]["progress"] = float(progress)
+        _task_store[task_id]["current_stage"] = stage
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            lambda: wf.fast_run(novel_text, mode) if pipeline == "fast" else wf.run(novel_text, mode),
+        )
+        status = result.get("status", "completed")
+        yaml_content = result.get("yaml_content", "")
+        _task_store[task_id].update({
+            "status": status,
+            "progress": 100.0,
+            "current_stage": "完成" if status == "completed" else "失败",
+            "output": yaml_content,
+            "yaml_content": yaml_content,
+        })
+    except Exception as e:
+        _task_store[task_id].update({
+            "status": "failed",
+            "progress": 100.0,
+            "current_stage": "错误",
+            "error": str(e),
+        })
