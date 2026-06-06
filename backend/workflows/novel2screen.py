@@ -42,14 +42,11 @@ class Novel2ScreenWorkflow:
         return reader.get_chapters()
 
     def _init_semantic_memory(self, novel_text: str) -> None:
-        chunks = smart_chunk(
-            novel_text,
-            chunk_size=getattr(self.config, "CHUNK_SIZE", 1500),
-            overlap=getattr(self.config, "CHUNK_OVERLAP", 200),
-        )
-        ids = [f"chunk_{i}" for i in range(len(chunks))]
-        metadatas = [{"source": "novel", "chunk_index": i} for i in range(len(chunks))]
-        self.memory_manager.semantic.index_chunks(chunks, ids=ids, metadatas=metadatas)
+        chunks = self.memory_manager.semantic.chunk_text(novel_text)
+        if not chunks:
+            return
+        self.memory_manager.semantic.index(chunks)
+        logger.info("Indexed %d chunks into semantic memory", len(chunks))
 
     def fast_run(self, novel_text: str, mode: str = "auto") -> ConvertResponse:
         task_id = f"task_{uuid.uuid4().hex[:12]}"
