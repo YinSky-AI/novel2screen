@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from backend.agents.narrative import NarrativeAgent
 from backend.config import settings
@@ -221,9 +225,20 @@ class ValidateRequest(BaseModel):
 
 
 @app.post("/convert", response_model=ConvertResponse)
-async def convert_novel(body: ConvertRequest) -> ConvertResponse:
-    novel_text = body.novel_text
-    pipeline = body.pipeline
+async def convert_novel(request: Request) -> ConvertResponse:
+    raw_body = await request.body()
+    logger.info(f"[/convert] raw body ({len(raw_body)} bytes): {raw_body[:500]}")
+    try:
+        data = json.loads(raw_body)
+    except json.JSONDecodeError as e:
+        logger.error(f"[/convert] JSON parse failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+    logger.info(f"[/convert] parsed keys: {list(data.keys())}")
+
+    novel_text = data.get("novel_text", "")
+    if not novel_text:
+        raise HTTPException(status_code=400, detail="novel_text is required")
+    pipeline = data.get("pipeline", "fast")
 
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     _task_store[task_id] = {
