@@ -4,6 +4,11 @@ from typing import Any
 
 from backend.agents.base import AgentBase
 
+SYSTEM_PROMPT = """You are a dialogue writer for screenplays.
+IMPORTANT: Write dialogue consistent with characters' established voice styles from the source text. Do NOT fabricate character traits or events.
+Respond in the same language as the input text.
+Output ONLY valid JSON, no markdown, no explanation."""
+
 
 class DialogueAgent(AgentBase):
     def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -13,7 +18,6 @@ class DialogueAgent(AgentBase):
         narrative: dict[str, Any] = input_data.get("narrative", {})
 
         query = f"{scene.get('scene_id', '')} {scene.get('location', novel_text[:500])}"
-        system_prompt = "You are a dialogue writer for screenplays. Output valid JSON only."
 
         character_styles = "\n".join(
             f"- {c.get('name', '')} ({c.get('id', '')}): {c.get('voice_style', 'natural')}"
@@ -51,7 +55,7 @@ Output ONLY a JSON object with field "beats" containing an array. No markdown, n
         if self._retry_errors:
             prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
 
-        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.8)
+        response = self._call_llm(prompt, system_prompt=SYSTEM_PROMPT, temperature=0.8)
         return self._parse_json(response)
 
     def validate(self, output: dict[str, Any]) -> bool:

@@ -158,15 +158,42 @@ def _extract_json_brackets(text: str) -> Any | None:
 
 
 def parse_chapters(text: str) -> list[dict[str, str]]:
-    pattern = r"(?:第[零一二三四五六七八九十百千\d]+章|Chapter\s+\d+)[^\n]*"
+    pattern = (
+        r"(?:^第\s*[零一二三四五六七八九十百千\d]+\s*[章节卷][^\n]*"
+        r"|^第\s*\d+\s*节[^\n]*"
+        r"|^Chapter\s+\d+[^\n]*"
+        r"|^Part\s+\d+[^\n]*"
+        r"|^Book\s+\d+[^\n]*"
+        r"|^[一二三四五六七八九十]+、[^\n]*)"
+    )
+    flags = re.MULTILINE | re.IGNORECASE
+    matches = list(re.finditer(pattern, text, flags=flags))
     chapters: list[dict[str, str]] = []
-    splits = re.split(f"({pattern})", text)
-    if len(splits) < 3:
-        return [{"title": "Full Text", "content": text}]
-    for i in range(1, len(splits), 2):
-        title = splits[i].strip()
-        content = splits[i + 1].strip() if i + 1 < len(splits) else ""
-        chapters.append({"title": title, "content": content})
+
+    for j, match in enumerate(matches):
+        title = match.group().strip()
+        start = match.end()
+        end = matches[j + 1].start() if j + 1 < len(matches) else len(text)
+        content = text[start:end].strip()
+        if len(content) >= 20:
+            chapters.append({"title": title, "content": content})
+
+    if chapters:
+        return chapters
+
+    parts = re.split(r"\n{3,}", text)
+    parts = [p.strip() for p in parts if p.strip()]
+    if len(parts) >= 2:
+        for idx, part in enumerate(parts, 1):
+            if len(part) >= 20:
+                lines = part.split("\n", 1)
+                title = lines[0].strip()
+                content = lines[1].strip() if len(lines) > 1 else part
+                chapters.append({"title": title, "content": content})
+
+    if not chapters:
+        chapters.append({"title": "全文", "content": text.strip()})
+
     return chapters
 
 
@@ -181,33 +208,85 @@ def estimate_tokens(text: str) -> int:
 
 
 def detect_language(text: str) -> str:
+    if not text:
+        return "english"
     chinese_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
-    if chinese_chars > len(text) * 0.15:
+    ratio = chinese_chars / len(text)
+    if ratio > 0.15:
         return "chinese"
+    if ratio > 0.05:
+        return "mixed"
     return "english"
 
 
-def smart_chunk(text: str, max_tokens: int | None = None, overlap: int | None = None) -> list[str]:
-    if max_tokens is None:
-        max_tokens = settings.CHUNK_SIZE
-    if overlap is None:
-        overlap = settings.CHUNK_OVERLAP
-    paragraphs = text.split("\n")
-    chunks: list[str] = []
+def chunk_paragraphs(text: str, max_chars: int = 500) -> list[dict[str, str]]:
+    paragraphs = re.split(r"\n\s*\n", text)
+    paragraphs = [p.strip() for p in paragraphs if p.strip()]
+    if not paragraphs:
+        return []
+    chunks: list[dict[str, str]] = []
     current: list[str] = []
     current_size = 0
+    chunk_num = 0
     for para in paragraphs:
         para_size = len(para)
-        if current_size + para_size > max_tokens and current:
-            chunks.append("\n".join(current))
-            overlap_start = max(0, len(current) - max(1, overlap // (max(1, current_size // max(1, len(current))))))
-            current = current[overlap_start:]
-            current_size = sum(len(p) for p in current)
+        if current_size + para_size > max_chars and current:
+            chunk_num += 1
+            chunks.append({"text": "\n\n".join(current), "source": f"chunk_{chunk_num}"})
+            current = []
+            current_size = 0
         current.append(para)
         current_size += para_size
     if current:
-        chunks.append("\n".join(current))
-    return chunks or [text]
+        chunk_num += 1
+        chunks.append({"text": "\n\n".join(current), "source": f"chunk_{chunk_num}"})
+    return chunks
+
+
+def extract_named_entities(text: str) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {"characters": [], "locations": []}
+    lang = detect_language(text)
+
+    if lang in ("chinese", "mixed"):
+        import collections
+
+        common_words: set[str] = {
+            "我们", "他们", "自己", "什么", "没有", "可以", "已经", "因为", "所以",
+            "但是", "如果", "虽然", "而且", "这个", "那个", "这里", "那里", "一个",
+            "一下", "一切", "一直", "一样", "不会", "不能", "不过", "不是",
+        }
+        clean = "".join(ch for ch in text if "\u4e00" <= ch <= "\u9fff")
+        seqs: collections.Counter[str] = collections.Counter()
+        for size in (2, 3, 4):
+            for i in range(len(clean) - size + 1):
+                seq = clean[i : i + size]
+                if seq not in common_words:
+                    seqs[seq] += 1
+        top = [(s, c) for s, c in seqs.most_common(50) if c >= 2]
+        result["characters"] = [s for s, _ in top[:20]]
+
+        loc_seqs: collections.Counter[str] = collections.Counter()
+        location_suffixes = [
+            "村", "镇", "城", "市", "省", "国", "山", "河", "湖", "海",
+            "森林", "平原", "学院", "广场", "宫殿", "王国", "帝国",
+        ]
+        for suf in location_suffixes:
+            loc_pattern = re.compile(rf"[\u4e00-\u9fff]{{0,3}}{re.escape(suf)}")
+            for match in loc_pattern.finditer(text):
+                loc_seqs[match.group()] += 1
+        result["locations"] = [s for s, c in loc_seqs.most_common(20) if c >= 1]
+
+    if lang in ("english", "mixed"):
+        capital_pattern = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+))\b")
+        name_counts: dict[str, int] = {}
+        for match in capital_pattern.finditer(text):
+            name = match.group(1)
+            name_counts[name] = name_counts.get(name, 0) + 1
+        if lang == "english":
+            top_en = [(n, c) for n, c in sorted(name_counts.items(), key=lambda x: -x[1])[:20] if c >= 1]
+            result["characters"] = [n for n, _ in top_en]
+
+    return result
 
 
 def _get_demo_preprocess_data() -> dict[str, Any]:

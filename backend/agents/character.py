@@ -4,6 +4,12 @@ from typing import Any
 
 from backend.agents.base import AgentBase
 
+SYSTEM_PROMPT = """You are a character analyst. Extract ALL characters from the novel text.
+IMPORTANT: Only include characters explicitly named in the text. Do NOT fabricate any characters.
+For each character provide: id (char_001 format), name, role (protagonist/antagonist/supporting), goal, fear, arc, voice_style.
+Respond in the same language as the input text.
+Output ONLY valid JSON with a "characters" array."""
+
 
 class CharacterAgent(AgentBase):
     def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -12,7 +18,6 @@ class CharacterAgent(AgentBase):
         existing_characters: list[dict[str, Any]] = input_data.get("existing_characters", [])
 
         query = novel_text[:3000]
-        system_prompt = "You are a character analyst for screenplays. Output valid JSON only."
         characters_hint = ""
         if existing_characters:
             characters_hint = f"\n\nExisting characters to expand upon:\n{existing_characters}"
@@ -38,7 +43,7 @@ Output ONLY a JSON object with field "characters" containing an array. No markdo
         if self._retry_errors:
             prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
 
-        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.5)
+        response = self._call_llm(prompt, system_prompt=SYSTEM_PROMPT, temperature=0.5)
         return self._parse_json(response)
 
     def validate(self, output: dict[str, Any]) -> bool:

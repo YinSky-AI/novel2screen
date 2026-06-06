@@ -4,6 +4,11 @@ from typing import Any
 
 from backend.agents.base import AgentBase
 
+SYSTEM_PROMPT = """You are a scene planner for screenplays.
+IMPORTANT: Base all scenes on content explicitly present in the source text. Do NOT fabricate scenes, characters, or locations.
+Respond in the same language as the input text.
+Output ONLY valid JSON, no markdown, no explanation."""
+
 
 class ScenePlannerAgent(AgentBase):
     def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -16,7 +21,6 @@ class ScenePlannerAgent(AgentBase):
         episode_data = next((ep for ep in episodes if ep.get("id") == episode_id), episodes[0]) if episodes else {}
 
         query = f"{episode_data.get('summary', novel_text[:1000])}"
-        system_prompt = "You are a scene planner for screenplays. Output valid JSON only."
 
         character_list = [f"{c.get('name', '')} (id: {c.get('id', '')})" for c in characters]
         known_locations = [loc.get("name", "") for loc in world.get("locations", [])]
@@ -54,7 +58,7 @@ Output ONLY a JSON object with fields "episode_id" (string) and "scenes" (array)
         if self._retry_errors:
             prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
 
-        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.7)
+        response = self._call_llm(prompt, system_prompt=SYSTEM_PROMPT, temperature=0.7)
         return self._parse_json(response)
 
     def validate(self, output: dict[str, Any]) -> bool:

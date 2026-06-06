@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.core.preprocessor import detect_language, estimate_tokens, parse_chapters, smart_chunk
+from backend.core.preprocessor import detect_language, estimate_tokens, parse_chapters, chunk_paragraphs
 
 
 class NovelReader:
@@ -13,8 +13,8 @@ class NovelReader:
     def get_chapters(self) -> list[dict[str, str | int]]:
         return self.chapters
 
-    def get_chunks(self, chunk_size: int = 1500, overlap: int = 200) -> list[str]:
-        return smart_chunk(self.text, chunk_size=chunk_size, overlap=overlap)
+    def get_chunks(self, max_chars: int = 500) -> list[dict[str, str]]:
+        return chunk_paragraphs(self.text, max_chars=max_chars)
 
     def get_summary(self) -> dict[str, int | str]:
         return {
@@ -25,4 +25,4 @@ class NovelReader:
         }
 
 
-__all__ = ["NovelReader", "detect_language", "parse_chapters", "estimate_tokens", "smart_chunk"]
+__all__ = ["NovelReader", "detect_language", "parse_chapters", "estimate_tokens", "chunk_paragraphs"]

@@ -105,8 +105,8 @@ class MockSettings:
 class TestFastPipelineDemo:
     def test_fast_pipeline_demo(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "backend.workflows.novel2screen.smart_chunk",
-            lambda text, chunk_size=1500, overlap=200: [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)],
+            "backend.core.preprocessor.chunk_paragraphs",
+            lambda text, max_chars=500: [{"text": text[i:i+max_chars], "source": f"chunk_{i//max_chars+1}"} for i in range(0, len(text), max_chars)],
         )
         llm = MockLLM()
         memory = MagicMock()
@@ -118,15 +118,15 @@ class TestFastPipelineDemo:
 
         result = wf.fast_run(novel_text, mode="auto")
 
-        assert result.status == "completed"
-        assert result.task_id.startswith("task_")
-        assert len(result.yaml_content) > 0
-        assert "title" in result.yaml_content.lower()
+        assert result["status"] == "completed"
+        assert result["task_id"].startswith("task_")
+        assert len(result["yaml_content"]) > 0
+        assert "title" in result["yaml_content"].lower()
 
     def test_full_pipeline_demo(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "backend.workflows.novel2screen.smart_chunk",
-            lambda text, chunk_size=1500, overlap=200: [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)],
+            "backend.core.preprocessor.chunk_paragraphs",
+            lambda text, max_chars=500: [{"text": text[i:i+max_chars], "source": f"chunk_{i//max_chars+1}"} for i in range(0, len(text), max_chars)],
         )
         llm = MockLLM()
         memory = MagicMock()
@@ -139,8 +139,8 @@ class TestFastPipelineDemo:
 
         result = wf.run(novel_text, mode="auto")
 
-        assert result.status == "completed"
-        assert len(result.yaml_content) > 0
+        assert result["status"] == "completed"
+        assert len(result["yaml_content"]) > 0
 
     def test_demo_screenplay_valid(self) -> None:
         report = validate_screenplay_yaml(_DEMO_SCREENPLAY_YAML)

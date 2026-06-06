@@ -188,6 +188,8 @@ class SemanticMemory:
         self._get_embed_fn()
 
     def _get_embed_fn(self) -> None:
+        if self._embed_failed:
+            return None
         if self._embed_model is not None:
             return
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -232,6 +234,8 @@ class SemanticMemory:
         return chunks
 
     def index(self, documents: list[dict[str, Any]]) -> None:
+        if not documents:
+            return
         self._ensure_initialized()
         self._documents = list(documents)
         if self._collection is None or self._embed_failed:
@@ -302,7 +306,7 @@ class SemanticMemory:
 
         q_bigrams = _bigrams(query)
         if not q_bigrams or not self._documents:
-            return [{"content": "", "id": "empty", "distance": 1.0}]
+            return []
 
         scored = []
         for doc in self._documents:
@@ -328,6 +332,14 @@ class SemanticMemory:
         scored = [(doc, _jaccard(query_set, set(doc.lower().split()))) for doc in documents]
         scored.sort(key=lambda x: x[1], reverse=True)
         return [s[0] for s in scored[:top_k]]
+
+    def clear(self) -> None:
+        self._documents = []
+        if self._collection is not None:
+            try:
+                self._collection.delete(ids=self._collection.get()['ids'])
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

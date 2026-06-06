@@ -79,6 +79,8 @@ async def upload_novel(file: UploadFile = File(...)) -> UploadResponse:
     novel_text = content.decode("utf-8")
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     language = detect_language(novel_text)
+    chapters = parse_chapters(novel_text)
+    chapter_count = len(chapters)
     _task_store[task_id] = {
         "status": "uploaded",
         "progress": 0.0,
@@ -93,6 +95,7 @@ async def upload_novel(file: UploadFile = File(...)) -> UploadResponse:
         filename=file.filename or "unknown",
         char_count=len(novel_text),
         language=language,
+        chapter_count=chapter_count,
     )
 
 
@@ -213,7 +216,7 @@ class ValidateRequest(BaseModel):
 
 
 @app.post("/convert", response_model=ConvertResponse)
-async def convert_novel(request: Request) -> ConvertResponse:
+async def convert_novel(request: Request, pipeline: str = Query(None)) -> ConvertResponse:
     raw_body = await request.body()
     logger.info(f"[/convert] raw body ({len(raw_body)} bytes): {raw_body[:500]}")
     try:
@@ -226,7 +229,9 @@ async def convert_novel(request: Request) -> ConvertResponse:
     novel_text = data.get("novel_text", "")
     if not novel_text:
         raise HTTPException(status_code=400, detail="novel_text is required")
-    pipeline = data.get("pipeline", "fast")
+
+    if pipeline is None:
+        pipeline = data.get("pipeline", "fast" if len(novel_text) < 15000 else "full")
 
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     _task_store[task_id] = {
@@ -236,9 +241,6 @@ async def convert_novel(request: Request) -> ConvertResponse:
         "output": "",
         "novel_text": novel_text,
     }
-
-    wf = _get_workflow()
-    loop = asyncio.get_event_loop()
 
     if pipeline == "demo":
         _task_store[task_id].update({
@@ -255,22 +257,8 @@ async def convert_novel(request: Request) -> ConvertResponse:
             yaml_content=_DEMO_SCREENPLAY_YAML,
         )
 
-    result = await loop.run_in_executor(
-        None,
-        lambda: wf.fast_run(novel_text, "auto") if pipeline == "fast" else wf.run(novel_text, "auto"),
-    )
-
-    status = result.get("status", "completed")
-    yaml_content = result.get("yaml_content", "")
-    _task_store[task_id].update({
-        "status": status,
-        "progress": 100.0,
-        "current_stage": "Complete",
-        "output": yaml_content,
-        "yaml_content": yaml_content,
-    })
-
-    return ConvertResponse(task_id=task_id, status=status, yaml_content=yaml_content)
+    asyncio.create_task(_run_generation(task_id, novel_text, "auto", pipeline))
+    return ConvertResponse(task_id=task_id, status="generating")
 
 
 class FileConvertRequest(BaseModel):
@@ -348,51 +336,20 @@ async def detect_novel_language(body: dict[str, Any]) -> DetectLanguageResponse:
 
 
 async def _run_generation(task_id: str, novel_text: str, mode: str, pipeline: str) -> None:
+    """Background generation task with progress tracking."""
     wf = _get_workflow()
-    stages = []
-    if pipeline == "fast":
-        stages = [
-            (15, "正在分析叙事结构..."),
-            (35, "正在提取角色..."),
-            (60, "正在构建剧本..."),
-            (90, "正在生成YAML..."),
-        ]
-    else:
-        stages = [
-            (10, "正在分析叙事结构..."),
-            (20, "正在提取角色信息..."),
-            (30, "正在分析世界观..."),
-            (40, "正在组织时间线..."),
-            (50, "正在规划剧集..."),
-            (60, "正在规划场景..."),
-            (70, "正在编写对话..."),
-            (80, "正在质量评审..."),
-            (90, "正在生成YAML..."),
-        ]
-
-    for progress, stage in stages:
-        _task_store[task_id]["progress"] = float(progress)
-        _task_store[task_id]["current_stage"] = stage
-
+    stages = [(15, "Analyzing narrative..."), (40, "Extracting characters..."), (70, "Building screenplay..."), (90, "Generating YAML...")] if pipeline == "fast" else [(10, "Analyzing narrative..."), (20, "Extracting characters..."), (30, "Analyzing world..."), (40, "Organizing timeline..."), (50, "Planning episodes..."), (60, "Planning scenes..."), (70, "Writing dialogue..."), (80, "Quality review..."), (90, "Generating YAML...")]
+    for pg, st in stages:
+        if task_id in _task_store:
+            _task_store[task_id]["progress"] = float(pg)
+            _task_store[task_id]["current_stage"] = st
     try:
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: wf.fast_run(novel_text, mode) if pipeline == "fast" else wf.run(novel_text, mode),
-        )
+        result = await asyncio.to_thread(wf.fast_run if pipeline == "fast" else wf.run, novel_text, mode)
         status = result.get("status", "completed")
         yaml_content = result.get("yaml_content", "")
-        _task_store[task_id].update({
-            "status": status,
-            "progress": 100.0,
-            "current_stage": "完成" if status == "completed" else "失败",
-            "output": yaml_content,
-            "yaml_content": yaml_content,
-        })
+        if task_id in _task_store:
+            _task_store[task_id].update({"status": status, "progress": 100.0, "current_stage": "Complete" if status == "completed" else "Failed", "output": yaml_content, "yaml_content": yaml_content})
     except Exception as e:
-        _task_store[task_id].update({
-            "status": "failed",
-            "progress": 100.0,
-            "current_stage": "错误",
-            "error": str(e),
-        })
+        logger.exception("_run_generation failed")
+        if task_id in _task_store:
+            _task_store[task_id].update({"status": "failed", "progress": 100.0, "current_stage": "Error", "error": str(e)})

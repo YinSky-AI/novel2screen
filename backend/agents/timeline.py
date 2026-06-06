@@ -4,6 +4,11 @@ from typing import Any
 
 from backend.agents.base import AgentBase
 
+SYSTEM_PROMPT = """You are a story timeline analyst for screenplay adaptation.
+IMPORTANT: Only include events explicitly described in the text. Do NOT fabricate any events, characters, or locations.
+Respond in the same language as the input text.
+Output ONLY valid JSON, no markdown, no explanation."""
+
 
 class TimelineAgent(AgentBase):
     def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -12,7 +17,6 @@ class TimelineAgent(AgentBase):
         narrative: dict[str, Any] = input_data.get("narrative", {})
 
         query = novel_text[:3000]
-        system_prompt = "You are a story timeline analyst. Output valid JSON only."
 
         character_names = [c.get("name", "") for c in characters]
 
@@ -42,7 +46,7 @@ Output ONLY a JSON object. No markdown, no explanation."""
         if self._retry_errors:
             prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
 
-        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.5)
+        response = self._call_llm(prompt, system_prompt=SYSTEM_PROMPT, temperature=0.5)
         return self._parse_json(response)
 
     def validate(self, output: dict[str, Any]) -> bool:

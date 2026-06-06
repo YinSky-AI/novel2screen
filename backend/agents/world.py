@@ -4,13 +4,17 @@ from typing import Any
 
 from backend.agents.base import AgentBase
 
+SYSTEM_PROMPT = """You are a world-building specialist for screen adaptations.
+IMPORTANT: Only include locations, rules, and details explicitly described in the text. Do NOT fabricate anything.
+Respond in the same language as the input text.
+Output ONLY valid JSON, no markdown, no explanation."""
+
 
 class WorldAgent(AgentBase):
     def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
         novel_text: str = input_data.get("novel_text", "")
 
         query = novel_text[:3000]
-        system_prompt = "You are a world-building specialist for screen adaptations. Output valid JSON only."
 
         base_prompt = f"""Analyze the following novel excerpt and extract world-building details:
 
@@ -35,7 +39,7 @@ Output ONLY a JSON object. No markdown, no explanation."""
         if self._retry_errors:
             prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
 
-        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.5)
+        response = self._call_llm(prompt, system_prompt=SYSTEM_PROMPT, temperature=0.5)
         return self._parse_json(response)
 
     def validate(self, output: dict[str, Any]) -> bool:

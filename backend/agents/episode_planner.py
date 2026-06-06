@@ -4,6 +4,11 @@ from typing import Any
 
 from backend.agents.base import AgentBase
 
+SYSTEM_PROMPT = """You are an episode planner for TV series adaptation.
+IMPORTANT: Base all episodes on events and characters explicitly present in the source text. Do NOT fabricate events.
+Respond in the same language as the input text.
+Output ONLY valid JSON, no markdown, no explanation."""
+
 
 class EpisodePlannerAgent(AgentBase):
     def run(self, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -13,7 +18,6 @@ class EpisodePlannerAgent(AgentBase):
         target_episodes: int = input_data.get("target_episodes", 10)
 
         query = novel_text[:3000]
-        system_prompt = "You are an episode planner for TV series adaptation. Output valid JSON only."
 
         base_prompt = f"""Plan a TV series adaptation with approximately {target_episodes} episodes.
 
@@ -42,7 +46,7 @@ Output ONLY a JSON object with fields "episodes" (array) and "season_arc" (strin
         if self._retry_errors:
             prompt = f"Previous errors: {', '.join(self._retry_errors)}\n\n" + prompt
 
-        response = self._call_llm(prompt, system_prompt=system_prompt, temperature=0.6)
+        response = self._call_llm(prompt, system_prompt=SYSTEM_PROMPT, temperature=0.6)
         return self._parse_json(response)
 
     def validate(self, output: dict[str, Any]) -> bool:

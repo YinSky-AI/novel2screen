@@ -1,9 +1,6 @@
 from __future__ import annotations
-
-import logging
-import uuid
+import logging, uuid
 from typing import Any
-
 from backend.agents.character import CharacterAgent
 from backend.agents.consistency import ConsistencyAgent
 from backend.agents.critic import CriticAgent
@@ -15,7 +12,7 @@ from backend.agents.scene_planner import ScenePlannerAgent
 from backend.agents.timeline import TimelineAgent
 from backend.agents.world import WorldAgent
 from backend.schemas.models import Screenplay
-from backend.schemas.validator import screenplay_to_yaml, validate_screenplay_yaml, yaml_to_screenplay
+from backend.schemas.validator import screenplay_to_yaml, validate_screenplay_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -36,71 +33,70 @@ class Novel2ScreenWorkflow:
         self._repair = RepairAgent(llm_client, memory_manager)
         self._consistency = ConsistencyAgent(llm_client, memory_manager)
 
-    def parse_and_segment(self, text: str) -> list[str]:
+    def parse_and_segment(self, text: str) -> list[dict[str, str]]:
         from backend.core.preprocessor import parse_chapters
         return parse_chapters(text)
 
     def _init_semantic_memory(self, novel_text: str) -> None:
         try:
-            chunks = self.memory_manager.semantic.chunk_text(novel_text)
-            if not chunks:
-                return
-            docs = [{"text": c, "source": "novel"} for c in chunks]
-            self.memory_manager.semantic.index(docs)
-            logger.info("Indexed %d chunks", len(chunks))
+            from backend.core.preprocessor import chunk_paragraphs
+            docs = chunk_paragraphs(novel_text, max_chars=500)
+            if docs:
+                self.memory_manager.semantic.index(docs)
+                logger.info("RAG: indexed %d chunks", len(docs))
         except Exception as e:
-            logger.warning("ChromaDB index skipped: %s", e)
+            logger.warning("RAG index skipped: %s", e)
 
     def fast_run(self, novel_text: str, mode: str = "auto") -> dict[str, Any]:
         task_id = f"task_{uuid.uuid4().hex[:12]}"
-        logger.info("fast_run | task_id=%s", task_id)
         self._init_semantic_memory(novel_text)
-
         try:
-            narrative = self._narrative.run({"novel_text": novel_text})
-            character_result = self._character.run({"novel_text": novel_text})
-            world_result = self._world.run({"novel_text": novel_text})
-
+            narrative = self._narrative.retry({"novel_text": novel_text})
+            character_result = self._character.retry({"novel_text": novel_text})
             screenplay = self._build_screenplay({
                 "narrative": narrative,
                 "characters": character_result,
-                "world": world_result,
+                "world": {},
                 "episodes": [],
             })
             yaml_content = screenplay_to_yaml(screenplay)
-
+            # Fidelity check: compare generated characters against source text entities
+            try:
+                from backend.core.preprocessor import extract_named_entities
+                src_entities = extract_named_entities(novel_text[:5000])
+                yaml_chars = set()
+                chars_data = character_result.get("characters", []) if isinstance(character_result, dict) else []
+                for c in chars_data:
+                    if isinstance(c, dict):
+                        name = c.get("name", "")
+                        if name:
+                            yaml_chars.add(name)
+                src_chars = set(src_entities.get("characters", []))
+                fabricated = yaml_chars - src_chars
+                if fabricated:
+                    logger.warning("Potential fabricated characters: %s", fabricated)
+            except Exception:
+                pass
             return {"task_id": task_id, "yaml_content": yaml_content, "status": "completed"}
         except Exception:
-            logger.exception("fast_run | task_id=%s | failed", task_id)
+            logger.exception("fast_run failed")
             return {"task_id": task_id, "yaml_content": "", "status": "failed"}
 
     def run(self, novel_text: str, mode: str = "auto") -> dict[str, Any]:
         task_id = f"task_{uuid.uuid4().hex[:12]}"
-        logger.info("run | task_id=%s", task_id)
         self._init_semantic_memory(novel_text)
-
         try:
             narrative = self._narrative.retry({"novel_text": novel_text})
             character_result = self._character.retry({"novel_text": novel_text})
             world_result = self._world.run({"novel_text": novel_text})
-            timeline = self._timeline.run({"novel_text": novel_text, "mode": mode})
+            timeline = self._timeline.run({"novel_text": novel_text})
 
-            ep_plan = self._episode_planner.run({
-                "narrative": narrative,
-                "characters": character_result,
-                "mode": mode,
-                "num_episodes": 4,
-            })
+            ep_plan = self._episode_planner.run({"novel_text": novel_text})
             episodes_data = ep_plan.get("episodes", [])
 
             assembled: list[dict[str, Any]] = []
             for ep in episodes_data:
-                ep_id = ep.get("id", "ep_001")
-                scenes = self._scene_planner.run({
-                    "episode_id": ep_id,
-                    "summary": ep.get("summary", ""),
-                    "characters": character_result.get("characters", []),
-                })
+                scenes = self._scene_planner.run({"novel_text": novel_text, "episode": ep})
                 ep["scenes"] = scenes.get("scenes", [])
                 assembled.append(ep)
 
@@ -112,51 +108,60 @@ class Novel2ScreenWorkflow:
             })
             yaml_content = screenplay_to_yaml(screenplay)
 
-            critic = self._critic.run({"yaml_content": yaml_content, "fast": False})
+            critic = self._critic.run({"yaml_content": yaml_content})
             violations = critic.get("violations", [])
             if violations:
                 repair = self._repair.run({"yaml_content": yaml_content, "violations": violations})
                 yaml_content = repair.get("repaired_yaml", yaml_content)
 
+            # Fidelity check: compare generated characters against source text entities
+            try:
+                from backend.core.preprocessor import extract_named_entities
+                src_entities = extract_named_entities(novel_text[:5000])
+                yaml_chars = set()
+                chars_data = character_result.get("characters", []) if isinstance(character_result, dict) else []
+                for c in chars_data:
+                    if isinstance(c, dict):
+                        name = c.get("name", "")
+                        if name:
+                            yaml_chars.add(name)
+                src_chars = set(src_entities.get("characters", []))
+                fabricated = yaml_chars - src_chars
+                if fabricated:
+                    logger.warning("Potential fabricated characters: %s", fabricated)
+            except Exception:
+                pass
+
             return {"task_id": task_id, "yaml_content": yaml_content, "status": "completed"}
         except Exception:
-            logger.exception("run | task_id=%s | failed", task_id)
+            logger.exception("run failed")
             return {"task_id": task_id, "yaml_content": "", "status": "failed"}
 
-    def _build_screenplay(self, data: dict[str, Any]) -> Screenplay:
+    def _build_screenplay(self, data: dict) -> Screenplay:
         narrative = data.get("narrative", {})
         if not isinstance(narrative, dict):
-            narrative = {"theme": str(narrative)}
+            narrative = {}
 
-        title = narrative.get("title", "") or narrative.get("theme", "Untitled")
-        logline = narrative.get("logline", "") or "A story unfolds."
+        title = narrative.get("title", "Untitled")
+        logline = narrative.get("logline", "")
         theme = narrative.get("theme", "")
         genre = narrative.get("genre", "drama")
 
-        world = data.get("world", {})
-        if isinstance(world, dict):
-            rules = world.get("world_rules", world)
-            if isinstance(rules, dict):
-                if rules.get("magic"):
-                    genre = "fantasy"
-                elif rules.get("technology"):
-                    genre = "sci-fi"
-
-        chars_raw = data.get("characters", [])
-        if isinstance(chars_raw, dict):
-            chars_raw = chars_raw.get("characters", [])
-        if not isinstance(chars_raw, list):
-            chars_raw = []
+        chars = data.get("characters", [])
+        if isinstance(chars, dict):
+            chars = chars.get("characters", [])
+        if not isinstance(chars, list):
+            chars = []
 
         from backend.schemas.models import Character, CharacterRole
 
         characters = []
-        for i, c in enumerate(chars_raw):
+        for i, c in enumerate(chars):
             if not isinstance(c, dict):
                 continue
-            role_str = c.get("role", "supporting")
+            role = c.get("role", "supporting")
             try:
-                role_enum = CharacterRole(role_str)
+                role_enum = CharacterRole(role)
             except ValueError:
                 role_enum = CharacterRole.SUPPORTING
             characters.append(Character(
@@ -169,77 +174,65 @@ class Novel2ScreenWorkflow:
                 voice_style=c.get("voice_style", ""),
             ))
 
-        episodes_raw = data.get("episodes", [])
-        if isinstance(episodes_raw, dict):
-            episodes_raw = episodes_raw.get("episodes", [])
-        if not isinstance(episodes_raw, list):
-            episodes_raw = []
+        eps = data.get("episodes", [])
+        if isinstance(eps, dict):
+            eps = eps.get("episodes", [])
+        if not isinstance(eps, list):
+            eps = []
+
+        if not eps and narrative.get("major_events"):
+            eps = [{"id": "ep_001", "title": title, "summary": logline, "scenes": []}]
 
         from backend.schemas.models import Episode, Scene, Beat, BeatType, Transition
 
         episodes = []
-        for ep_data in episodes_raw:
-            if not isinstance(ep_data, dict):
+        for ep in eps:
+            if not isinstance(ep, dict):
                 continue
-            scenes_raw = ep_data.get("scenes", [])
+            scenes_raw = ep.get("scenes", [])
             if isinstance(scenes_raw, dict):
                 scenes_raw = scenes_raw.get("scenes", [])
             if not isinstance(scenes_raw, list):
                 scenes_raw = []
-
             scenes = []
-            for sc_data in scenes_raw:
-                if not isinstance(sc_data, dict):
+            for sc in scenes_raw:
+                if not isinstance(sc, dict):
                     continue
-                beats_raw = sc_data.get("beats", [])
+                beats_raw = sc.get("beats", [])
                 if not isinstance(beats_raw, list):
                     beats_raw = []
                 beats = []
-                for b_data in beats_raw:
-                    if not isinstance(b_data, dict):
-                        continue
+                for b in beats_raw:
+                    if not isinstance(b, dict):
+                        beats_raw = []
+                        break
                     try:
-                        bt = BeatType(b_data.get("type", "action"))
+                        bt = BeatType(b.get("type", "action"))
                     except ValueError:
                         bt = BeatType.ACTION
-                    beats.append(Beat(
-                        type=bt,
-                        character_id=b_data.get("character_id"),
-                        content=b_data.get("content", ""),
-                        emotion=b_data.get("emotion"),
-                    ))
+                    beats.append(Beat(type=bt, character_id=b.get("character_id"), content=b.get("content", ""), emotion=b.get("emotion")))
+                if not beats and data.get("characters"):
+                    beats = [Beat(type=BeatType.ACTION, content=f"Scene at {sc.get('location', 'unknown')}", emotion=None)]
                 try:
-                    trans = Transition(sc_data.get("transition", "cut"))
+                    tr = Transition(sc.get("transition", "cut"))
                 except ValueError:
-                    trans = Transition.CUT
+                    tr = Transition.CUT
                 scenes.append(Scene(
-                    scene_id=sc_data.get("scene_id", f"sc_{(len(scenes)+1):03d}"),
-                    location=sc_data.get("location", ""),
-                    time=sc_data.get("time", ""),
-                    visual_focus=sc_data.get("visual_focus"),
-                    sound_effect=sc_data.get("sound_effect"),
-                    voice_over=sc_data.get("voice_over"),
+                    scene_id=sc.get("scene_id", f"sc_{(len(scenes)+1):03d}"),
+                    location=sc.get("location", ""),
+                    time=sc.get("time", ""),
                     beats=beats,
-                    transition=trans,
-                    duration_estimate=sc_data.get("duration_estimate", "30s"),
+                    transition=tr,
+                    duration_estimate=sc.get("duration_estimate", "30s"),
                 ))
-
             episodes.append(Episode(
-                id=ep_data.get("id", f"ep_{(len(episodes)+1):03d}"),
-                title=ep_data.get("title", ""),
-                summary=ep_data.get("summary", ""),
+                id=ep.get("id", f"ep_{(len(episodes)+1):03d}"),
+                title=ep.get("title", ""),
+                summary=ep.get("summary", ""),
                 scenes=scenes,
             ))
 
-        logger.info("_build_screenplay | title=%s | chars=%d | eps=%d", title, len(characters), len(episodes))
-        return Screenplay(
-            title=title,
-            logline=logline,
-            genre=genre,
-            theme=theme,
-            characters=characters,
-            episodes=episodes,
-        )
+        return Screenplay(title=title, logline=logline, genre=genre, theme=theme, characters=characters, episodes=episodes)
 
     def run_consistency_check(self, original_chunks: list[str], edited_yaml: str) -> dict[str, Any]:
         return self._consistency.run({

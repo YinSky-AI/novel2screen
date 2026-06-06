@@ -160,6 +160,7 @@ class UploadResponse(BaseModel):
     filename: str
     char_count: int
     language: str
+    chapter_count: int = 0
 
 
 class ImportEditsResponse(BaseModel):
