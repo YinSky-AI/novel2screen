@@ -63,6 +63,13 @@ class Beat(BaseModel):
     emotion: str | None = None
     source: str = ""
 
+    @field_validator("source", mode="before")
+    @classmethod
+    def _coerce_source(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        return str(v)
+
 
 class Scene(BaseModel):
     scene_id: str = Field(pattern=r"^sc_\d+$")
