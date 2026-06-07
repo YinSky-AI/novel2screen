@@ -6,6 +6,8 @@
 [![Tests](https://img.shields.io/badge/tests-68%20passed-green)](.)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 
+**Demo 演示视频：[Bilibili →](https://www.bilibili.com/video/BV1uQEx6uEEf/)**
+
 将小说自动改编为结构化剧本（YAML 格式）的多智能体系统。输入 3 章以上小说文本，输出可直接编辑的剧本初稿，支持中英文自适应。
 
 ## Features
