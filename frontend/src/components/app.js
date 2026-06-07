@@ -38,9 +38,6 @@ const i18n = {
     btnCopy: '复制',
     btnDownload: '下载',
     btnValidate: '验证',
-    btnEdit: '编辑',
-    btnSave: '保存',
-    btnCancel: '取消',
     btnNewConvert: '开始新的转换',
     elapsedTime: '耗时：',
     stageInit: '初始化...',
@@ -51,7 +48,6 @@ const i18n = {
     toastDownloaded: '下载完成！',
     toastValidated: 'YAML 验证通过 ✓',
     toastValidationError: '验证发现错误',
-    toastEditsImported: '编辑已导入成功！',
     toastReset: '已重置。',
     toastError: '发生错误',
     toastUploadSuccess: '文件上传成功！',
@@ -91,9 +87,6 @@ const i18n = {
     btnCopy: 'Copy',
     btnDownload: 'Download',
     btnValidate: 'Validate',
-    btnEdit: 'Edit',
-    btnSave: 'Save',
-    btnCancel: 'Cancel',
     btnNewConvert: 'New Conversion',
     elapsedTime: 'Elapsed:',
     stageInit: 'Initializing...',
@@ -104,7 +97,6 @@ const i18n = {
     toastDownloaded: 'Download complete!',
     toastValidated: 'YAML is valid!',
     toastValidationError: 'Validation found errors',
-    toastEditsImported: 'Edits imported successfully!',
     toastReset: 'Reset complete.',
     toastError: 'An error occurred',
     toastUploadSuccess: 'File uploaded successfully!',
@@ -179,14 +171,9 @@ const dom = {
   elapsedTime: $('#elapsed-time'),
   spinner: $('#spinner'),
   yamlOutput: $('#yaml-output'),
-  yamlEditor: $('#yaml-editor'),
   btnCopy: $('#btn-copy'),
   btnDownload: $('#btn-download'),
   btnValidate: $('#btn-validate'),
-  btnToggleEdit: $('#btn-toggle-edit'),
-  btnSaveEdit: $('#btn-save-edit'),
-  btnCancelEdit: $('#btn-cancel-edit'),
-  editActions: $('#edit-actions'),
   validationBadge: $('#validation-badge'),
   btnNewConvert: $('#btn-new-convert'),
   errorContainer: $('#error-container'),
@@ -200,7 +187,6 @@ const dom = {
 let state = {
   taskId: null,
   yamlContent: '',
-  isEditing: false,
   polling: null,
   elapsed: null,
   elapsedSeconds: 0,
@@ -221,9 +207,6 @@ function init() {
   dom.btnCopy.addEventListener('click', handleCopy);
   dom.btnDownload.addEventListener('click', handleDownload);
   dom.btnValidate.addEventListener('click', handleValidate);
-  dom.btnToggleEdit.addEventListener('click', handleToggleEdit);
-  dom.btnSaveEdit.addEventListener('click', handleSaveEdit);
-  dom.btnCancelEdit.addEventListener('click', handleCancelEdit);
   dom.btnNewConvert.addEventListener('click', handleReset);
   dom.fileInput.addEventListener('change', handleFileSelect);
   dom.fileUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); dom.fileUploadArea.classList.add('drag-over'); });
@@ -574,48 +557,8 @@ async function handleValidate() {
 }
 
 function renderValidationErrors(errors) {
-  const list = errors.map((e) => {
-    const cls = e.severity === 'error' ? 'validation-error' : 'validation-warning';
-    return '<li class="validation-item ' + cls + '">' + (e.message || e.msg || e) + '</li>';
-  }).join('');
-  dom.alignmentContent.innerHTML = '<ul class="validation-list">' + list + '</ul>';
-  dom.alignmentSection.classList.remove('hidden');
-}
-
-/* ===== Edit Mode ===== */
-function handleToggleEdit() {
-  state.isEditing = !state.isEditing;
-  if (state.isEditing) {
-    dom.yamlOutput.classList.add('hidden');
-    dom.yamlEditor.classList.remove('hidden');
-    dom.editActions.classList.remove('hidden');
-    dom.btnToggleEdit.textContent = currentLang === 'zh' ? '\u2715 取消' : '\u2715 Cancel';
-    dom.yamlEditor.focus();
-  } else {
-    dom.yamlOutput.classList.remove('hidden');
-    dom.yamlEditor.classList.add('hidden');
-    dom.editActions.classList.add('hidden');
-    dom.btnToggleEdit.textContent = t('btnEdit');
-  }
-}
-
-function handleSaveEdit() {
-  state.yamlContent = dom.yamlEditor.value;
-  renderYaml(state.yamlContent);
-  dom.yamlOutput.classList.remove('hidden');
-  dom.yamlEditor.classList.add('hidden');
-  dom.editActions.classList.add('hidden');
-  dom.btnToggleEdit.textContent = t('btnEdit');
-  state.isEditing = false;
-}
-
-function handleCancelEdit() {
-  dom.yamlEditor.value = state.yamlContent;
-  dom.yamlOutput.classList.remove('hidden');
-  dom.yamlEditor.classList.add('hidden');
-  dom.editActions.classList.add('hidden');
-  dom.btnToggleEdit.textContent = t('btnEdit');
-  state.isEditing = false;
+  const msgs = errors.map((e) => e.message || e.msg || e).join('; ');
+  showToast(msgs || t('toastValidationError'), 'warning');
 }
 
 /* ===== Reset ===== */
@@ -624,7 +567,6 @@ function handleReset() {
   stopTimer();
   state.taskId = null;
   state.yamlContent = '';
-  state.isEditing = false;
   state.uploadFile = null;
   dom.novelText.value = '';
   dom.fileInput.value = '';
@@ -632,17 +574,12 @@ function handleReset() {
   dom.fileUploadArea.querySelector('.file-upload-text').classList.remove('hidden');
   dom.btnConvert.disabled = false;
   dom.yamlOutput.innerHTML = '';
-  dom.yamlEditor.value = '';
-  dom.yamlEditor.classList.add('hidden');
-  dom.yamlOutput.classList.remove('hidden');
-  dom.editActions.classList.add('hidden');
   dom.validationBadge.classList.add('hidden');
   dom.langDetection.classList.add('hidden');
   dom.progressFill.style.width = '0%';
   dom.progressPercent.textContent = '0%';
   dom.progressStage.textContent = t('stageInit');
   dom.elapsedTime.textContent = '00:00';
-  dom.btnToggleEdit.textContent = t('btnEdit');
   showStep(1);
   hideError();
   updateCharCounter();

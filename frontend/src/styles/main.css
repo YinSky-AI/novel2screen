@@ -528,22 +528,6 @@ body {
 .yaml-output .yaml-comment { color: #8b6f5e; font-style: italic; }
 .yaml-output .yaml-punctuation { color: #c0a88a; }
 
-.yaml-editor {
-  width: 100%;
-  min-height: 300px;
-  padding: 20px;
-  border: 2px solid var(--color-orange);
-  border-radius: var(--radius-md);
-  background: #2b1f14;
-  color: #e8d5b7;
-  font-family: var(--font-mono);
-  font-size: 0.85rem;
-  line-height: 1.65;
-  resize: vertical;
-  outline: none;
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-brown-light) #2b1f14;
-}
 
 /* ===== Badges ===== */
 .badge {

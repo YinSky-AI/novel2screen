@@ -452,22 +452,35 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
         validation = validate_screenplay_yaml(edited_yaml)
 
         if not validation.valid:
-            original_chunks: list[str] = []
-            repair_result = self._repair.run({
-                "yaml_content": edited_yaml,
-                "issues": [{"severity": "critical", "category": "validation", "description": e} for e in validation.errors],
-                "suggestions": validation.warnings,
-                "original_text": "",
-            })
+            try:
+                result = self._repair.run({
+                    "yaml_content": edited_yaml,
+                    "issues": [{"severity": "critical", "category": "validation", "description": e} for e in validation.errors],
+                    "suggestions": validation.warnings,
+                    "original_text": "",
+                })
+                repair_result = result if isinstance(result, dict) else {}
+            except Exception:
+                logger.warning("RepairAgent failed in import_edits, returning raw validation")
+                return {
+                    "task_id": task_id,
+                    "status": "validation_failed",
+                    "validated": False,
+                    "repaired_yaml": edited_yaml,
+                    "changes": [],
+                    "errors": validation.errors,
+                }
 
             if repair_result.get("repaired_yaml"):
                 revalidated = validate_screenplay_yaml(repair_result["repaired_yaml"])
+                changes_raw = repair_result.get("changes_made", [])
+                changes = [c if isinstance(c, str) else c.get("field", "") for c in (changes_raw if isinstance(changes_raw, list) else [])]
                 return {
                     "task_id": task_id,
                     "status": "repaired" if revalidated.valid else "validation_failed",
                     "validated": revalidated.valid,
-                    "repaired_yaml": repair_result.get("repaired_yaml", ""),
-                    "changes": [c.get("field", c) if isinstance(c, dict) else c for c in repair_result.get("changes_made", [])],
+                    "repaired_yaml": repair_result["repaired_yaml"],
+                    "changes": changes,
                 }
 
         critic_result = self._critic.run({
@@ -480,7 +493,7 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
             "task_id": task_id,
             "status": "validated",
             "validated": validation.valid,
-            "critic_score": critic_result.get("score", 0),
+            "critic_score": critic_result.get("score", 0) if isinstance(critic_result, dict) else 0,
             "repaired_yaml": edited_yaml,
             "changes": [],
         }
