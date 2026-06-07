@@ -8,7 +8,6 @@ import {
   importEdits,
   getAlignment,
   validateYaml,
-  assessYaml,
   healthCheck,
   detectLanguage,
 } from '../utils/api.js';
@@ -48,16 +47,6 @@ const i18n = {
     importEdits: '导入编辑',
     importEditsHint: '上传 YAML/JSON 编辑文件',
     alignmentReport: '对齐报告',
-    tabNovel2Screen: '小说转剧本',
-    tabYamlEditor: 'YAML 编辑器',
-    yamlEditorTitle: 'YAML 编辑器（独立模式）',
-    yamlPasteLabel: '粘贴 YAML 内容',
-    yamlPastePlaceholder: '在此粘贴 YAML 内容...',
-    yamlFileUpload: '上传 YAML 文件',
-    yamlDropOrClick: '拖拽 YAML 文件或点击上传',
-    yamlBtnLoad: '加载 YAML',
-    yamlBtnReset: '清空',
-    yamlBtnBack: '返回上传',
     elapsedTime: '耗时：',
     stageInit: '初始化...',
     stageProcessing: '处理中...',
@@ -114,16 +103,6 @@ const i18n = {
     importEdits: 'Import Edits',
     importEditsHint: 'Upload YAML/JSON edits file',
     alignmentReport: 'Alignment Report',
-    tabNovel2Screen: 'Novel2Screen',
-    tabYamlEditor: 'YAML Editor',
-    yamlEditorTitle: 'YAML Editor (Standalone)',
-    yamlPasteLabel: 'Paste YAML Content',
-    yamlPastePlaceholder: 'Paste your YAML content here...',
-    yamlFileUpload: 'Upload YAML File',
-    yamlDropOrClick: 'Drop YAML file or click to upload',
-    yamlBtnLoad: 'Load YAML',
-    yamlBtnReset: 'Clear',
-    yamlBtnBack: 'Back to Upload',
     elapsedTime: 'Elapsed:',
     stageInit: 'Initializing...',
     stageProcessing: 'Processing...',
@@ -228,34 +207,6 @@ const dom = {
   stepEl1: $('[data-step="1"]'),
   stepEl2: $('[data-step="2"]'),
   stepEl3: $('[data-step="3"]'),
-  stepIndicator: $('.step-indicator'),
-
-  // Mode tabs
-  modeTabs: $$('.mode-tab'),
-
-  // Standalone YAML Editor
-  yamlEditorPanel: $('#yaml-editor-panel'),
-  yamlUploadSection: $('#yaml-upload-section'),
-  yamlEditorView: $('#yaml-editor-view'),
-  yamlPasteInput: $('#yaml-paste-input'),
-  yamlFileUploadArea: $('#yaml-file-upload-area'),
-  yamlFileInput: $('#yaml-file-input'),
-  yamlFileName: $('#yaml-file-name'),
-  btnYamlLoad: $('#btn-yaml-load'),
-  btnYamlReset: $('#btn-yaml-reset'),
-  btnYamlBack: $('#btn-yaml-back'),
-  yamlOutputStandalone: $('#yaml-output-standalone'),
-  yamlEditorStandalone: $('#yaml-editor-standalone'),
-  btnYamlCopy: $('#btn-yaml-copy'),
-  btnYamlDownload: $('#btn-yaml-download'),
-  btnYamlValidate: $('#btn-yaml-validate'),
-  btnYamlToggleEdit: $('#btn-yaml-toggle-edit'),
-  btnYamlSaveEdit: $('#btn-yaml-save-edit'),
-  btnYamlCancelEdit: $('#btn-yaml-cancel-edit'),
-  yamlValidationBadge: $('#yaml-validation-badge'),
-  yamlEditActions: $('#yaml-edit-actions'),
-  yamlQualityPanel: $('#yaml-quality-panel'),
-  yamlQualityStats: $('#yaml-quality-stats'),
 };
 
 /* ===== State ===== */
@@ -268,10 +219,6 @@ let state = {
   elapsedSeconds: 0,
   uploadFile: null,
   importFile: null,
-  // Standalone YAML Editor mode
-  yamlStandaloneContent: '',
-  yamlStandaloneEditing: false,
-  yamlStandaloneUploadFile: null,
 };
 
 /* ===== Initialization ===== */
@@ -300,27 +247,6 @@ function init() {
   dom.importUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); dom.importUploadArea.classList.add('drag-over'); });
   dom.importUploadArea.addEventListener('dragleave', () => dom.importUploadArea.classList.remove('drag-over'));
   dom.importUploadArea.addEventListener('drop', handleImportFileDrop);
-
-  // Mode tabs
-  dom.modeTabs.forEach((tab) => {
-    tab.addEventListener('click', () => switchMode(tab.dataset.mode));
-  });
-
-  // Standalone YAML Editor
-  dom.yamlPasteInput.addEventListener('input', () => { /* no-op, just for paste */ });
-  dom.yamlFileInput.addEventListener('change', handleYamlFileSelect);
-  dom.yamlFileUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); dom.yamlFileUploadArea.classList.add('drag-over'); });
-  dom.yamlFileUploadArea.addEventListener('dragleave', () => dom.yamlFileUploadArea.classList.remove('drag-over'));
-  dom.yamlFileUploadArea.addEventListener('drop', handleYamlFileDrop);
-  dom.btnYamlLoad.addEventListener('click', handleYamlLoad);
-  dom.btnYamlReset.addEventListener('click', handleYamlReset);
-  dom.btnYamlBack.addEventListener('click', handleYamlBack);
-  dom.btnYamlCopy.addEventListener('click', handleYamlCopy);
-  dom.btnYamlDownload.addEventListener('click', handleYamlDownload);
-  dom.btnYamlValidate.addEventListener('click', handleYamlValidate);
-  dom.btnYamlToggleEdit.addEventListener('click', handleYamlToggleEdit);
-  dom.btnYamlSaveEdit.addEventListener('click', handleYamlSaveEdit);
-  dom.btnYamlCancelEdit.addEventListener('click', handleYamlCancelEdit);
 
   checkHealth();
 }
@@ -643,11 +569,10 @@ function handleDownload() {
 }
 
 async function handleValidate() {
-  const content = state.yamlContent || state.yamlStandaloneContent || '';
-  if (!content) return;
+  if (!state.taskId) return;
   dom.validationBadge.classList.add('hidden');
   try {
-    const result = await validateYaml(content);
+    const result = await validateYaml(state.yamlContent || '');
     if (result.valid || result.is_valid) {
       dom.validationBadge.textContent = '\u2714 ' + t('toastValidated');
       dom.validationBadge.className = 'badge badge-success';
@@ -782,228 +707,6 @@ async function loadAlignment() {
   }
 }
 
-/* ===== Mode Switching ===== */
-function switchMode(mode) {
-  dom.modeTabs.forEach((tab) => {
-    tab.classList.toggle('active', tab.dataset.mode === mode);
-  });
-
-  if (mode === 'yaml-editor') {
-    dom.stepIndicator.classList.add('hidden');
-    dom.stepPanel1.classList.add('hidden');
-    dom.stepPanel2.classList.add('hidden');
-    dom.stepPanel3.classList.add('hidden');
-    dom.yamlEditorPanel.classList.remove('hidden');
-  } else {
-    dom.stepIndicator.classList.remove('hidden');
-    dom.yamlEditorPanel.classList.add('hidden');
-    // Show current step
-    const visibleStep = [dom.stepPanel1, dom.stepPanel2, dom.stepPanel3].findIndex((p) => !p.classList.contains('hidden'));
-    if (visibleStep === -1) dom.stepPanel1.classList.remove('hidden');
-  }
-}
-
-/* ===== Standalone YAML Editor ===== */
-function handleYamlFileSelect(e) {
-  const file = e.target.files[0];
-  if (file) {
-    state.yamlStandaloneUploadFile = file;
-    dom.yamlFileName.textContent = file.name;
-    dom.yamlFileName.classList.remove('hidden');
-    dom.yamlFileUploadArea.querySelector('.file-upload-text').classList.add('hidden');
-  }
-}
-
-function handleYamlFileDrop(e) {
-  e.preventDefault();
-  dom.yamlFileUploadArea.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (file) {
-    state.yamlStandaloneUploadFile = file;
-    dom.yamlFileName.textContent = file.name;
-    dom.yamlFileName.classList.remove('hidden');
-    dom.yamlFileUploadArea.querySelector('.file-upload-text').classList.add('hidden');
-  }
-}
-
-function handleYamlLoad() {
-  const pasteText = dom.yamlPasteInput.value.trim();
-  if (pasteText) {
-    state.yamlStandaloneContent = pasteText;
-    showYamlEditorView();
-    renderYamlStandalone(pasteText);
-    return;
-  }
-  if (state.yamlStandaloneUploadFile) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      state.yamlStandaloneContent = e.target.result;
-      showYamlEditorView();
-      renderYamlStandalone(state.yamlStandaloneContent);
-    };
-    reader.readAsText(state.yamlStandaloneUploadFile);
-    return;
-  }
-  showToast(currentLang === 'zh' ? '请粘贴 YAML 内容或上传文件。' : 'Please paste YAML or upload a file.', 'warning');
-}
-
-function showYamlEditorView() {
-  dom.yamlUploadSection.classList.add('hidden');
-  dom.yamlEditorView.classList.remove('hidden');
-  dom.yamlValidationBadge.classList.add('hidden');
-  dom.yamlQualityPanel.classList.add('hidden');
-}
-
-function showYamlUploadView() {
-  dom.yamlUploadSection.classList.remove('hidden');
-  dom.yamlEditorView.classList.add('hidden');
-  dom.yamlValidationBadge.classList.add('hidden');
-}
-
-function handleYamlBack() {
-  state.yamlStandaloneContent = '';
-  state.yamlStandaloneEditing = false;
-  dom.yamlEditorStandalone.classList.add('hidden');
-  dom.yamlOutputStandalone.classList.remove('hidden');
-  dom.yamlEditActions.classList.add('hidden');
-  dom.btnYamlToggleEdit.textContent = t('btnEdit');
-  showYamlUploadView();
-}
-
-function handleYamlReset() {
-  state.yamlStandaloneContent = '';
-  state.yamlStandaloneEditing = false;
-  state.yamlStandaloneUploadFile = null;
-  dom.yamlPasteInput.value = '';
-  dom.yamlFileInput.value = '';
-  dom.yamlFileName.classList.add('hidden');
-  dom.yamlFileUploadArea.querySelector('.file-upload-text').classList.remove('hidden');
-  dom.yamlOutputStandalone.innerHTML = '';
-  dom.yamlEditorStandalone.value = '';
-  dom.yamlEditorStandalone.classList.add('hidden');
-  dom.yamlOutputStandalone.classList.remove('hidden');
-  dom.yamlEditActions.classList.add('hidden');
-  dom.btnYamlToggleEdit.textContent = t('btnEdit');
-  dom.yamlValidationBadge.classList.add('hidden');
-  dom.yamlQualityPanel.classList.add('hidden');
-  showYamlUploadView();
-}
-
-function renderYamlStandalone(yaml) {
-  state.yamlStandaloneContent = yaml;
-  dom.yamlOutputStandalone.innerHTML = highlightYaml(yaml);
-  dom.yamlEditorStandalone.value = yaml;
-}
-
-function handleYamlCopy() {
-  if (!state.yamlStandaloneContent) return;
-  navigator.clipboard.writeText(state.yamlStandaloneContent).then(() => {
-    showToast(t('toastCopied'), 'success');
-  }).catch(() => {
-    showToast(t('toastError'), 'error');
-  });
-}
-
-function handleYamlDownload() {
-  if (!state.yamlStandaloneContent) return;
-  const blob = new Blob([state.yamlStandaloneContent], { type: 'text/yaml' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'screenplay.yaml';
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast(t('toastDownloaded'), 'success');
-}
-
-async function handleYamlValidate() {
-  if (!state.yamlStandaloneContent) return;
-  dom.yamlValidationBadge.classList.add('hidden');
-  try {
-    const result = await validateYaml(state.yamlStandaloneContent);
-    if (result.valid || result.is_valid) {
-      dom.yamlValidationBadge.textContent = '\u2714 ' + t('toastValidated');
-      dom.yamlValidationBadge.className = 'badge badge-success';
-      dom.yamlValidationBadge.classList.remove('hidden');
-      showToast(t('toastValidated'), 'success');
-      // Also try quality assessment
-      try {
-        const qResult = await assessYaml(state.yamlStandaloneContent);
-        if (qResult && qResult.valid_yaml) {
-          renderYamlQuality(qResult);
-        }
-      } catch {}
-    } else {
-      dom.yamlValidationBadge.textContent = '\u2718 ' + t('toastValidationError');
-      dom.yamlValidationBadge.className = 'badge badge-error';
-      dom.yamlValidationBadge.classList.remove('hidden');
-      showToast(t('toastValidationError'), 'warning');
-    }
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-}
-
-function handleYamlToggleEdit() {
-  state.yamlStandaloneEditing = !state.yamlStandaloneEditing;
-  if (state.yamlStandaloneEditing) {
-    dom.yamlOutputStandalone.classList.add('hidden');
-    dom.yamlEditorStandalone.classList.remove('hidden');
-    dom.yamlEditActions.classList.remove('hidden');
-    dom.btnYamlToggleEdit.textContent = currentLang === 'zh' ? '\u2715 取消' : '\u2715 Cancel';
-    dom.yamlEditorStandalone.focus();
-  } else {
-    dom.yamlOutputStandalone.classList.remove('hidden');
-    dom.yamlEditorStandalone.classList.add('hidden');
-    dom.yamlEditActions.classList.add('hidden');
-    dom.btnYamlToggleEdit.textContent = t('btnEdit');
-  }
-}
-
-function handleYamlSaveEdit() {
-  state.yamlStandaloneContent = dom.yamlEditorStandalone.value;
-  renderYamlStandalone(state.yamlStandaloneContent);
-  dom.yamlOutputStandalone.classList.remove('hidden');
-  dom.yamlEditorStandalone.classList.add('hidden');
-  dom.yamlEditActions.classList.add('hidden');
-  dom.btnYamlToggleEdit.textContent = t('btnEdit');
-  state.yamlStandaloneEditing = false;
-}
-
-function handleYamlCancelEdit() {
-  dom.yamlEditorStandalone.value = state.yamlStandaloneContent;
-  dom.yamlOutputStandalone.classList.remove('hidden');
-  dom.yamlEditorStandalone.classList.add('hidden');
-  dom.yamlEditActions.classList.add('hidden');
-  dom.btnYamlToggleEdit.textContent = t('btnEdit');
-  state.yamlStandaloneEditing = false;
-}
-
-function renderYamlQuality(quality) {
-  if (!quality || !quality.valid_yaml) {
-    dom.yamlQualityPanel.classList.add('hidden');
-    return;
-  }
-  dom.yamlQualityPanel.classList.remove('hidden');
-
-  const emo = Math.round((1 - (quality.emotion_null_rate || 0)) * 100);
-  const cid = Math.round((1 - (quality.char_id_null_rate || 0)) * 100);
-  const dur = Math.round((1 - (quality.duration_diversity || 0)) * 100);
-  const beats = quality.beat_count || 0;
-  const scenes = quality.scene_count || 0;
-  const issues = quality.issues || [];
-
-  const grade = (v) => v >= 90 ? 'good' : v >= 60 ? 'warn' : 'bad';
-
-  dom.yamlQualityStats.innerHTML = `
-    <div class="q-stat ${grade(emo)}"><span class="q-val">${emo}%</span><span class="q-label">Emotion</span></div>
-    <div class="q-stat ${grade(cid)}"><span class="q-val">${cid}%</span><span class="q-label">Char ID</span></div>
-    <div class="q-stat ${grade(dur)}"><span class="q-val">${dur}%</span><span class="q-label">Variety</span></div>
-    <div class="q-stat"><span class="q-val">${beats}</span><span class="q-label">Beats</span></div>
-    <div class="q-stat"><span class="q-val">${scenes}</span><span class="q-label">Scenes</span></div>
-  ` + (issues.length > 0 ? `<div class="q-issues">${issues.filter(i => !i.includes('No quality issues')).map(i => '<span>' + escapeHtml(i) + '</span>').join('')}</div>` : '');
-}
-
 /* ===== Reset ===== */
 function handleReset() {
   stopPolling();
@@ -1013,9 +716,6 @@ function handleReset() {
   state.isEditing = false;
   state.uploadFile = null;
   state.importFile = null;
-  state.yamlStandaloneContent = '';
-  state.yamlStandaloneEditing = false;
-  state.yamlStandaloneUploadFile = null;
   dom.novelText.value = '';
   dom.fileInput.value = '';
   dom.fileName.classList.add('hidden');
@@ -1041,10 +741,6 @@ function handleReset() {
   hideError();
   updateCharCounter();
   showToast(t('toastReset'), 'info');
-  // Also reset standalone YAML view
-  handleYamlReset();
-  // Ensure we're in novel2screen mode
-  switchMode('novel2screen');
 }
 
 /* ===== Error Display ===== */

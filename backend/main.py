@@ -17,7 +17,7 @@ from backend.agents.narrative import NarrativeAgent
 from backend.config import settings
 from backend.core.llm import LLMClient
 from backend.core.memory import MemoryManager
-from backend.core.preprocessor import detect_language, evaluate_yaml_quality, parse_chapters
+from backend.core.preprocessor import detect_language, parse_chapters
 from backend.schemas.models import (
     AlignmentResponse,
     ConvertResponse,
@@ -316,20 +316,6 @@ async def validate_yaml(body: dict[str, Any]) -> ValidateResponse:
         errors=report.errors,
         warnings=report.warnings,
     )
-
-
-@app.post("/yaml/assess")
-async def assess_yaml(body: dict[str, Any]) -> dict[str, Any]:
-    yaml_content = body.get("yaml_content", "")
-    if not yaml_content:
-        raise HTTPException(status_code=400, detail="No yaml_content provided")
-    report = validate_screenplay_yaml(yaml_content)
-    quality = evaluate_yaml_quality(yaml_content)
-    return {
-        "valid_yaml": report.valid,
-        "validation_errors": report.errors,
-        **quality,
-    }
 
 
 @app.get("/usage", response_model=UsageStats)

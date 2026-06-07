@@ -153,41 +153,6 @@ body {
   padding: 24px 20px 48px;
 }
 
-/* ===== Mode Tabs ===== */
-.mode-tabs {
-  display: flex;
-  gap: 0;
-  margin-bottom: 24px;
-  border-bottom: 2px solid var(--color-border);
-  padding-bottom: 0;
-}
-
-.mode-tab {
-  flex: 1;
-  padding: 12px 20px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 0.95rem;
-  font-weight: 600;
-  font-family: var(--font-sans);
-  cursor: pointer;
-  transition: all var(--transition);
-  border-bottom: 3px solid transparent;
-  margin-bottom: -2px;
-}
-
-.mode-tab:hover {
-  color: var(--color-brown);
-  background: var(--color-cream);
-}
-
-.mode-tab.active {
-  color: var(--color-orange);
-  border-bottom-color: var(--color-orange);
-  background: transparent;
-}
-
 /* ===== Step Indicator ===== */
 .step-indicator {
   display: flex;
