@@ -45,7 +45,7 @@ const i18n = {
     btnCancel: '取消',
     btnNewConvert: '开始新的转换',
     importEdits: '导入编辑',
-    importEditsHint: '上传 YAML/JSON 编辑文件',
+    importEditsHint: '功能开发中，敬请期待 ✨',
     alignmentReport: '对齐报告',
     elapsedTime: '耗时：',
     stageInit: '初始化...',
@@ -101,7 +101,7 @@ const i18n = {
     btnCancel: 'Cancel',
     btnNewConvert: 'New Conversion',
     importEdits: 'Import Edits',
-    importEditsHint: 'Upload YAML/JSON edits file',
+    importEditsHint: 'Coming soon ✨',
     alignmentReport: 'Alignment Report',
     elapsedTime: 'Elapsed:',
     stageInit: 'Initializing...',
@@ -243,10 +243,12 @@ function init() {
   dom.fileUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); dom.fileUploadArea.classList.add('drag-over'); });
   dom.fileUploadArea.addEventListener('dragleave', () => dom.fileUploadArea.classList.remove('drag-over'));
   dom.fileUploadArea.addEventListener('drop', handleFileDrop);
-  dom.importFileInput.addEventListener('change', handleImportFileSelect);
-  dom.importUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); dom.importUploadArea.classList.add('drag-over'); });
-  dom.importUploadArea.addEventListener('dragleave', () => dom.importUploadArea.classList.remove('drag-over'));
-  dom.importUploadArea.addEventListener('drop', handleImportFileDrop);
+  if (dom.importFileInput) dom.importFileInput.addEventListener('change', handleImportFileSelect);
+  if (dom.importUploadArea) {
+    dom.importUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); dom.importUploadArea.classList.add('drag-over'); });
+    dom.importUploadArea.addEventListener('dragleave', () => dom.importUploadArea.classList.remove('drag-over'));
+    dom.importUploadArea.addEventListener('drop', handleImportFileDrop);
+  }
 
   checkHealth();
 }
@@ -727,10 +729,10 @@ function handleReset() {
   dom.yamlOutput.classList.remove('hidden');
   dom.editActions.classList.add('hidden');
   dom.validationBadge.classList.add('hidden');
-  dom.alignmentSection.classList.add('hidden');
-  dom.importFileName.classList.add('hidden');
-  dom.importUploadArea.querySelector('.file-upload-text').classList.remove('hidden');
-  dom.importFileInput.value = '';
+  if (dom.alignmentSection) dom.alignmentSection.classList.add('hidden');
+  if (dom.importFileName) dom.importFileName.classList.add('hidden');
+  if (dom.importUploadArea) dom.importUploadArea.querySelector('.file-upload-text').classList.remove('hidden');
+  if (dom.importFileInput) dom.importFileInput.value = '';
   dom.langDetection.classList.add('hidden');
   dom.progressFill.style.width = '0%';
   dom.progressPercent.textContent = '0%';
