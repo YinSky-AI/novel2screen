@@ -170,47 +170,50 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
             fallback = [{"scene_id": "sc_001", "location": "Unknown", "time": "Day", "transition": "cut", "duration_estimate": "60s", "beats": [{"type": "action", "content": "Scene", "emotion": "neutral"}]}]
         return fallback
 
-    def run(self, novel_text: str, mode: str = "auto") -> dict[str, Any]:
-        task_id = f"task_{uuid.uuid4().hex[:12]}"
+    def run(self, novel_text: str, mode: str = "auto", task_id: str = "") -> dict[str, Any]:
+        tid = task_id or f"task_{uuid.uuid4().hex[:12]}"
         self._init_semantic_memory(novel_text)
 
-        # Step 0: Key point detection for skeleton validation
         from backend.core.preprocessor import detect_key_points, detect_language
         key_points = detect_key_points(novel_text)
         must_preserve = key_points["must_preserve"]
         lang = detect_language(novel_text)
 
         try:
+            self._update_progress(tid, 8, "Analyzing narrative structure...")
             narrative = self._narrative.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
+
+            self._update_progress(tid, 18, "Extracting all characters...")
             character_result = self._character.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
             char_list = character_result.get("characters", []) if isinstance(character_result, dict) else []
 
+            self._update_progress(tid, 26, "Building world context...")
             world_result = self._world.run({"novel_text": novel_text})
+
+            self._update_progress(tid, 32, "Organizing timeline...")
             _timeline = self._timeline.run({"novel_text": novel_text})
 
-            # Step 1: Skeleton — episode + scene outlines
+            self._update_progress(tid, 40, "Planning episodes...")
             ep_plan = self._episode_planner.run({"novel_text": novel_text, "characters": char_list})
             episodes_data = ep_plan.get("episodes", [])
 
-            # Step 2: Skeleton validation — check key events covered
+            self._update_progress(tid, 48, "Validating episode structure...")
             skeleton_yaml = yaml.dump(episodes_data[:3], allow_unicode=True) if episodes_data else ""
             if skeleton_yaml and must_preserve:
-                critic_input = {
-                    "yaml_content": skeleton_yaml,
-                    "fast": True,
-                    "must_preserve": must_preserve,
-                }
-                critic_result = self._critic.run(critic_input)
+                critic_result = self._critic.run({"yaml_content": skeleton_yaml, "fast": True, "must_preserve": must_preserve})
                 if critic_result.get("score", 100) < 50 and len(episodes_data) < 5:
-                    logger.info("Skeleton validation score low (%.0f), retrying episode planning", critic_result.get("score", 0))
+                    logger.info("Skeleton validation score low (%.0f), retrying", critic_result.get("score", 0))
                     ep_plan = self._episode_planner.run({"novel_text": novel_text, "characters": char_list, "must_preserve": must_preserve})
                     episodes_data = ep_plan.get("episodes", [])
 
-            # Step 3: Detail — scene planning + dialogue writing
             assembled: list[dict[str, Any]] = []
-            for ep in episodes_data:
+            total_eps = max(len(episodes_data), 1)
+            for ep_idx, ep in enumerate(episodes_data):
                 if not isinstance(ep, dict):
                     continue
+                pct = 50 + int(35 * (ep_idx + 1) / total_eps)
+                self._update_progress(tid, float(pct), f"Writing scenes: episode {ep_idx+1}/{total_eps}...")
+
                 scenes_result = self._scene_planner.run({
                     "episode_id": ep.get("id", "ep_001"),
                     "summary": ep.get("summary", ""),
@@ -222,10 +225,7 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                 for sc in scenes_list:
                     if not isinstance(sc, dict):
                         continue
-                    dialogue_result = self._dialogue.run({
-                        "scene": sc,
-                        "characters": char_list,
-                    })
+                    dialogue_result = self._dialogue.run({"scene": sc, "characters": char_list})
                     beats = dialogue_result.get("beats", []) if isinstance(dialogue_result, dict) else []
                     sc["beats"] = beats if beats else [{"type": "action", "content": sc.get("objective", "Scene"), "emotion": None}]
                     scenes_with_dialogue.append(sc)
@@ -233,14 +233,16 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                 ep["scenes"] = scenes_with_dialogue
                 assembled.append(ep)
 
+            self._update_progress(tid, 88, "Assembling screenplay...")
             screenplay = self._build_screenplay({
                 "narrative": narrative,
                 "characters": character_result,
                 "world": world_result,
                 "episodes": assembled,
             })
-            yaml_content = screenplay_to_yaml(screenplay, lang)
 
+            self._update_progress(tid, 94, "Quality review...")
+            yaml_content = screenplay_to_yaml(screenplay, lang)
             critic = self._critic.run({"yaml_content": yaml_content})
             violations = critic.get("violations", [])
             if violations:
@@ -248,10 +250,16 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                 yaml_content = repair.get("repaired_yaml", yaml_content)
 
             self._fidelity_check(novel_text, character_result)
-            return {"task_id": task_id, "yaml_content": yaml_content, "status": "completed"}
+
+            from backend.core.preprocessor import evaluate_yaml_quality
+            quality = evaluate_yaml_quality(yaml_content)
+
+            self._update_progress(tid, 100, "Complete!")
+            return {"task_id": tid, "yaml_content": yaml_content, "status": "completed", "quality": quality}
         except Exception:
             logger.exception("run failed")
-            return {"task_id": task_id, "yaml_content": "", "status": "failed"}
+            self._update_progress(tid, 100, "Failed")
+            return {"task_id": tid, "yaml_content": "", "status": "failed"}
 
     def _fidelity_check(self, novel_text: str, character_result: dict) -> None:
         try:
