@@ -30,6 +30,72 @@
 
   <!-- Main Container -->
   <main class="main-container">
+    <!-- Mode Tabs -->
+    <div class="mode-tabs">
+      <button class="mode-tab active" data-mode="novel2screen" data-i18n="tabNovel2Screen">Novel2Screen</button>
+      <button class="mode-tab" data-mode="yaml-editor" data-i18n="tabYamlEditor">YAML Editor</button>
+    </div>
+
+    <!-- YAML Editor Panel (standalone) -->
+    <section id="yaml-editor-panel" class="card hidden">
+      <h2 class="card-title" data-i18n="yamlEditorTitle">YAML Editor</h2>
+      <!-- Upload zone -->
+      <div id="yaml-upload-section">
+        <div class="form-group">
+          <label class="form-label" for="yaml-paste-input" data-i18n="yamlPasteLabel">Paste YAML Content</label>
+          <textarea
+            id="yaml-paste-input"
+            class="novel-textarea"
+            placeholder="Paste your YAML content here..."
+            rows="10"
+            data-i18n-placeholder="yamlPastePlaceholder"
+          ></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group file-upload-group">
+            <label class="form-label" data-i18n="yamlFileUpload">Upload YAML File</label>
+            <div class="file-upload-area" id="yaml-file-upload-area">
+              <input type="file" id="yaml-file-input" accept=".yaml,.yml,.json" class="file-input-hidden" />
+              <span class="file-upload-text" data-i18n="yamlDropOrClick">Drop YAML file or click to upload</span>
+              <span id="yaml-file-name" class="file-name hidden"></span>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button id="btn-yaml-load" class="btn btn-primary" data-i18n="yamlBtnLoad">Load YAML</button>
+          <button id="btn-yaml-reset" class="btn btn-secondary" data-i18n="yamlBtnReset">Clear</button>
+        </div>
+      </div>
+
+      <!-- Editor view (shown after load) -->
+      <div id="yaml-editor-view" class="hidden">
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <button id="btn-yaml-copy" class="btn btn-tool" data-i18n="btnCopy">Copy</button>
+            <button id="btn-yaml-download" class="btn btn-tool" data-i18n="btnDownload">Download</button>
+            <button id="btn-yaml-validate" class="btn btn-tool" data-i18n="btnValidate">Validate</button>
+            <button id="btn-yaml-toggle-edit" class="btn btn-tool" data-i18n="btnEdit">Edit</button>
+          </div>
+          <div id="yaml-validation-badge" class="badge hidden"></div>
+        </div>
+        <div class="yaml-container">
+          <pre id="yaml-output-standalone" class="yaml-output"></pre>
+          <textarea id="yaml-editor-standalone" class="yaml-editor hidden" spellcheck="false"></textarea>
+        </div>
+        <div id="yaml-edit-actions" class="form-actions hidden">
+          <button id="btn-yaml-save-edit" class="btn btn-primary" data-i18n="btnSave">Save</button>
+          <button id="btn-yaml-cancel-edit" class="btn btn-secondary" data-i18n="btnCancel">Cancel</button>
+        </div>
+        <div id="yaml-quality-panel" class="quality-panel hidden">
+          <h4 class="quality-title">Quality Assessment</h4>
+          <div id="yaml-quality-stats" class="quality-stats"></div>
+        </div>
+        <div class="form-actions">
+          <button id="btn-yaml-back" class="btn btn-secondary" data-i18n="yamlBtnBack">Back to Upload</button>
+        </div>
+      </div>
+    </section>
+
     <!-- Step Indicator -->
     <div class="step-indicator">
       <div class="step" data-step="1">

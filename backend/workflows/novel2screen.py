@@ -467,7 +467,7 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                     "status": "repaired" if revalidated.valid else "validation_failed",
                     "validated": revalidated.valid,
                     "repaired_yaml": repair_result.get("repaired_yaml", ""),
-                    "changes": [c.get("field", "") for c in repair_result.get("changes_made", [])],
+                    "changes": [c.get("field", c) if isinstance(c, dict) else c for c in repair_result.get("changes_made", [])],
                 }
 
         critic_result = self._critic.run({

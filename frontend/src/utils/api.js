@@ -87,6 +87,13 @@ function validateYaml(yamlContent) {
   });
 }
 
+function assessYaml(yamlContent) {
+  return request('/yaml/assess', {
+    method: 'POST',
+    body: { yaml_content: yamlContent },
+  });
+}
+
 function getUsage() {
   return request('/usage');
 }
@@ -112,6 +119,7 @@ export {
   importEdits,
   getAlignment,
   validateYaml,
+  assessYaml,
   getUsage,
   healthCheck,
   detectLanguage,
