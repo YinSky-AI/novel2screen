@@ -110,7 +110,7 @@ def yaml_to_screenplay(yaml_str: str) -> Screenplay:
                     voice_over=s_data.get("voice_over"),
                     beats=beats,
                     transition=Transition(s_data.get("transition", "cut")),
-duration_estimate="60s",
+                    duration_estimate=s_data.get("duration_estimate", "60s"),
                 )
             )
         episodes.append(

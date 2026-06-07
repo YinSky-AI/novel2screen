@@ -215,6 +215,7 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                 self._update_progress(tid, float(pct), f"Writing scenes: episode {ep_idx+1}/{total_eps}...")
 
                 scenes_result = self._scene_planner.run({
+                    "novel_text": novel_text,
                     "episode_id": ep.get("id", "ep_001"),
                     "summary": ep.get("summary", ""),
                     "characters": char_list,
@@ -225,7 +226,11 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                 for sc in scenes_list:
                     if not isinstance(sc, dict):
                         continue
-                    dialogue_result = self._dialogue.run({"scene": sc, "characters": char_list})
+                    dialogue_result = self._dialogue.run({
+                        "scene": sc,
+                        "characters": char_list,
+                        "novel_text": novel_text,
+                    })
                     beats = dialogue_result.get("beats", []) if isinstance(dialogue_result, dict) else []
                     sc["beats"] = beats if beats else [{"type": "action", "content": sc.get("objective", "Scene"), "emotion": None}]
                     scenes_with_dialogue.append(sc)
@@ -244,9 +249,9 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
             self._update_progress(tid, 94, "Quality review...")
             yaml_content = screenplay_to_yaml(screenplay, lang)
             critic = self._critic.run({"yaml_content": yaml_content})
-            violations = critic.get("violations", [])
-            if violations:
-                repair = self._repair.run({"yaml_content": yaml_content, "violations": violations})
+            issues = critic.get("issues", [])
+            if issues:
+                repair = self._repair.run({"yaml_content": yaml_content, "issues": issues})
                 yaml_content = repair.get("repaired_yaml", yaml_content)
 
             self._fidelity_check(novel_text, character_result)
@@ -288,6 +293,16 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
         logline = narrative.get("logline", "")
         theme = narrative.get("theme", "")
         genre = narrative.get("genre", "drama")
+
+        # Use world data to refine genre if available
+        world = data.get("world", {})
+        if isinstance(world, dict):
+            rules = world.get("world_rules", {})
+            if isinstance(rules, dict):
+                if rules.get("magic"):
+                    genre = "fantasy"
+                elif rules.get("technology"):
+                    genre = "sci-fi"
 
         chars = data.get("characters", [])
         if isinstance(chars, dict):
