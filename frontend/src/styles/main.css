@@ -625,30 +625,6 @@ body {
   margin-left: auto;
 }
 
-/* ===== Alignment Report ===== */
-.alignment-section {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  margin-top: 12px;
-  background: var(--color-cream);
-}
-
-.alignment-content { font-size: 0.88rem; }
-
-.alignment-item {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  gap: 8px;
-}
-
-.alignment-item:last-child { border-bottom: none; }
-
-.alignment-match { color: var(--color-green); font-weight: 600; }
-.alignment-mismatch { color: var(--color-red); font-weight: 600; }
-.alignment-field { color: var(--color-brown-light); font-weight: 500; min-width: 120px; }
-
 /* ===== Validation Result ===== */
 .validation-list {
   list-style: none;
@@ -674,15 +650,6 @@ body {
 .validation-error::before { background: var(--color-red); }
 .validation-warning::before { background: var(--color-gold); }
 .validation-ok::before { background: var(--color-green); }
-
-/* ===== Import Section ===== */
-.import-section {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  margin-top: 12px;
-  background: var(--color-cream);
-}
 
 /* ===== Footer ===== */
 .footer {

@@ -69,17 +69,6 @@ function exportYaml(taskId) {
   return request(`/export/yaml/${taskId}`);
 }
 
-function importEdits(taskId, yamlContent) {
-  return request(`/import-edits/${taskId}`, {
-    method: 'POST',
-    body: { yaml_content: yamlContent },
-  });
-}
-
-function getAlignment(taskId) {
-  return request(`/alignment/${taskId}`);
-}
-
 function validateYaml(yamlContent) {
   return request('/validate', {
     method: 'POST',
@@ -109,8 +98,6 @@ export {
   generateScreenplay,
   getTaskStatus,
   exportYaml,
-  importEdits,
-  getAlignment,
   validateYaml,
   getUsage,
   healthCheck,

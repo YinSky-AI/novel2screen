@@ -5,8 +5,6 @@ import {
   generateScreenplay,
   getTaskStatus,
   exportYaml,
-  importEdits,
-  getAlignment,
   validateYaml,
   healthCheck,
   detectLanguage,
@@ -44,9 +42,6 @@ const i18n = {
     btnSave: '保存',
     btnCancel: '取消',
     btnNewConvert: '开始新的转换',
-    importEdits: '导入编辑',
-    importEditsHint: '上传 YAML/JSON 编辑文件',
-    alignmentReport: '对齐报告',
     elapsedTime: '耗时：',
     stageInit: '初始化...',
     stageProcessing: '处理中...',
@@ -100,9 +95,6 @@ const i18n = {
     btnSave: 'Save',
     btnCancel: 'Cancel',
     btnNewConvert: 'New Conversion',
-    importEdits: 'Import Edits',
-    importEditsHint: 'Upload YAML/JSON edits file',
-    alignmentReport: 'Alignment Report',
     elapsedTime: 'Elapsed:',
     stageInit: 'Initializing...',
     stageProcessing: 'Processing...',
@@ -196,11 +188,6 @@ const dom = {
   btnCancelEdit: $('#btn-cancel-edit'),
   editActions: $('#edit-actions'),
   validationBadge: $('#validation-badge'),
-  importUploadArea: $('#import-upload-area'),
-  importFileInput: $('#import-file-input'),
-  importFileName: $('#import-file-name'),
-  alignmentSection: $('#alignment-section'),
-  alignmentContent: $('#alignment-content'),
   btnNewConvert: $('#btn-new-convert'),
   errorContainer: $('#error-container'),
   toastContainer: $('#toast-container'),
@@ -218,7 +205,6 @@ let state = {
   elapsed: null,
   elapsedSeconds: 0,
   uploadFile: null,
-  importFile: null,
 };
 
 /* ===== Initialization ===== */
@@ -243,11 +229,6 @@ function init() {
   dom.fileUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); dom.fileUploadArea.classList.add('drag-over'); });
   dom.fileUploadArea.addEventListener('dragleave', () => dom.fileUploadArea.classList.remove('drag-over'));
   dom.fileUploadArea.addEventListener('drop', handleFileDrop);
-  dom.importFileInput.addEventListener('change', handleImportFileSelect);
-  dom.importUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); dom.importUploadArea.classList.add('drag-over'); });
-  dom.importUploadArea.addEventListener('dragleave', () => dom.importUploadArea.classList.remove('drag-over'));
-  dom.importUploadArea.addEventListener('drop', handleImportFileDrop);
-
   checkHealth();
 }
 
@@ -637,76 +618,6 @@ function handleCancelEdit() {
   state.isEditing = false;
 }
 
-/* ===== Import Edits ===== */
-function handleImportFileSelect(e) {
-  const file = e.target.files[0];
-  if (file) {
-    state.importFile = file;
-    dom.importFileName.textContent = file.name;
-    dom.importFileName.classList.remove('hidden');
-    dom.importUploadArea.querySelector('.file-upload-text').classList.add('hidden');
-    doImportEdits(file);
-  }
-}
-
-function handleImportFileDrop(e) {
-  e.preventDefault();
-  dom.importUploadArea.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (file) {
-    state.importFile = file;
-    dom.importFileName.textContent = file.name;
-    dom.importFileName.classList.remove('hidden');
-    dom.importUploadArea.querySelector('.file-upload-text').classList.add('hidden');
-    doImportEdits(file);
-  }
-}
-
-async function doImportEdits(file) {
-  if (!state.taskId) return;
-  try {
-    const yamlContent = await file.text();
-    await importEdits(state.taskId, yamlContent);
-    showToast(t('toastEditsImported'), 'success');
-    loadAlignment();
-  } catch (err) {
-    showToast(err.message || t('toastError'), 'error');
-  }
-}
-
-async function loadAlignment() {
-  if (!state.taskId) return;
-  try {
-    const result = await getAlignment(state.taskId);
-    dom.alignmentSection.classList.remove('hidden');
-
-    let html = '';
-    const alignments = result.alignment || result.differences || result.diffs || [];
-    alignments.forEach((item) => {
-      const field = item.field || item.key || '';
-      const original = item.original || item.ai_value || '';
-      const edited = item.edited || item.imported_value || '';
-      const match = item.match !== false;
-      const cls = match ? 'alignment-match' : 'alignment-mismatch';
-      html += '<div class="alignment-item">';
-      html += '<span class="alignment-field">' + field + '</span>';
-      html += '<span class="' + cls + '">' + (match ? 'MATCH' : 'DIFF') + '</span>';
-      if (original) html += '<span>' + escapeHtml(String(original)) + '</span>';
-      if (edited && !match) html += '<span>\u2192 ' + escapeHtml(String(edited)) + '</span>';
-      html += '</div>';
-    });
-
-    if (!alignments.length) {
-      html = '<p>' + (currentLang === 'zh' ? '\u65E0对齐差异。' : 'No alignment differences.') + '</p>';
-    }
-
-    dom.alignmentContent.innerHTML = html;
-  } catch {
-    dom.alignmentSection.classList.remove('hidden');
-    dom.alignmentContent.innerHTML = '<p>' + (currentLang === 'zh' ? '\u52A0\u8F7D\u62A5\u544A\u5931\u8D25。' : 'Failed to load report.') + '</p>';
-  }
-}
-
 /* ===== Reset ===== */
 function handleReset() {
   stopPolling();
@@ -715,7 +626,6 @@ function handleReset() {
   state.yamlContent = '';
   state.isEditing = false;
   state.uploadFile = null;
-  state.importFile = null;
   dom.novelText.value = '';
   dom.fileInput.value = '';
   dom.fileName.classList.add('hidden');
@@ -727,10 +637,6 @@ function handleReset() {
   dom.yamlOutput.classList.remove('hidden');
   dom.editActions.classList.add('hidden');
   dom.validationBadge.classList.add('hidden');
-  dom.alignmentSection.classList.add('hidden');
-  dom.importFileName.classList.add('hidden');
-  dom.importUploadArea.querySelector('.file-upload-text').classList.remove('hidden');
-  dom.importFileInput.value = '';
   dom.langDetection.classList.add('hidden');
   dom.progressFill.style.width = '0%';
   dom.progressPercent.textContent = '0%';

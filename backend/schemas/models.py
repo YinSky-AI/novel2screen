@@ -198,20 +198,6 @@ class UploadResponse(BaseModel):
     chapter_count: int = 0
 
 
-class ImportEditsResponse(BaseModel):
-    task_id: str
-    status: str
-    validated: bool = False
-    repaired_yaml: str = ""
-    changes: list[str] = Field(default_factory=list)
-
-
-class AlignmentResponse(BaseModel):
-    task_id: str
-    original_text_alignment: list[dict[str, Any]] = Field(default_factory=list)
-    scene_to_source: list[dict[str, Any]] = Field(default_factory=list)
-
-
 class ValidateResponse(BaseModel):
     valid: bool
     errors: list[str] = Field(default_factory=list)

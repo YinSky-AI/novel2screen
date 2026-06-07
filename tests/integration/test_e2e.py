@@ -165,11 +165,4 @@ class TestE2EPipeline:
         assert result["status"] == "completed"
         assert len(result["yaml_content"]) > 0
 
-    def test_import_edits_validates_and_processes(self) -> None:
-        from backend.workflows.novel2screen import Novel2ScreenWorkflow
-        from backend.schemas.validator import _DEMO_SCREENPLAY_YAML
 
-        wf = Novel2ScreenWorkflow(MockSettings(), MockLLMClient(), _make_memory())
-        result = wf.import_edits("test_task", _DEMO_SCREENPLAY_YAML)
-        assert result["task_id"] == "test_task"
-        assert result["status"] in ("validated", "repaired", "validation_failed")

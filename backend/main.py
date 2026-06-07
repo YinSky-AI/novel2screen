@@ -19,11 +19,9 @@ from backend.core.llm import LLMClient
 from backend.core.memory import MemoryManager
 from backend.core.preprocessor import detect_language, parse_chapters
 from backend.schemas.models import (
-    AlignmentResponse,
     ConvertResponse,
     DetectLanguageResponse,
     HealthResponse,
-    ImportEditsResponse,
     NovelUploadRequest,
     TaskStatus,
     UploadResponse,
@@ -153,56 +151,6 @@ async def export_yaml(task_id: str) -> dict[str, Any]:
     wf.save_export(task_id, yaml_content)
 
     return {"task_id": task_id, "yaml_content": yaml_content, "filename": f"{task_id}.yaml"}
-
-
-@app.post("/import-edits/{task_id}", response_model=ImportEditsResponse)
-async def import_edits(task_id: str, body: dict[str, Any]) -> ImportEditsResponse:
-    if task_id not in _task_store:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    edited_yaml = body.get("yaml_content", "")
-    if not edited_yaml:
-        raise HTTPException(status_code=400, detail="No yaml_content provided")
-
-    wf = _get_workflow()
-    result = wf.import_edits(task_id, edited_yaml)
-
-    if result.get("repaired_yaml"):
-        _task_store[task_id]["yaml_content"] = result["repaired_yaml"]
-
-    return ImportEditsResponse(
-        task_id=task_id,
-        status=result.get("status", "validated"),
-        validated=result.get("validated", False),
-        repaired_yaml=result.get("repaired_yaml", ""),
-        changes=result.get("changes", []),
-    )
-
-
-@app.get("/alignment/{task_id}", response_model=AlignmentResponse)
-async def get_alignment(task_id: str) -> AlignmentResponse:
-    if task_id not in _task_store:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    td = _task_store[task_id]
-    wf = _get_workflow()
-    chapters = wf.parse_and_segment(td.get("novel_text", ""))
-
-    alignment = [
-        {
-            "chapter_index": ch.get("index", i),
-            "chapter_title": ch.get("title", ""),
-            "episode_mapping": f"ep_{(i // 2 + 1):03d}",
-            "key_passages": [p[:100] for p in ch.get("content", "").split("\n\n")[:3]],
-        }
-        for i, ch in enumerate(chapters)
-    ]
-
-    return AlignmentResponse(
-        task_id=task_id,
-        original_text_alignment=alignment,
-        scene_to_source=[],
-    )
 
 
 class ConvertRequest(BaseModel):

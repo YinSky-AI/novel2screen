@@ -265,12 +265,6 @@ class TestFastPipelineDemo:
         assert response.status == "error"
         assert "Something went wrong" in response.message
 
-    def test_workflow_import_edits(self) -> None:
-        wf = Novel2ScreenWorkflow(MockSettings(), MockLLM(), MagicMock())
-        result = wf.import_edits("test_task", _DEMO_SCREENPLAY_YAML)
-        assert result["task_id"] == "test_task"
-        assert result["status"] in ("validated", "repaired", "validation_failed")
-
     def test_workflow_save_export(self, tmp_path: Any) -> None:
         import os
         original_dir = os.getcwd()
