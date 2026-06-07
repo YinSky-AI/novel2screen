@@ -21,32 +21,22 @@ class RepairAgent(AgentBase):
         )
         suggestions_text = "\n".join(f"- {s}" for s in suggestions)
 
-        base_prompt = f"""Repair the following screenplay YAML based on the identified issues and suggestions.
+        base_prompt = f"""Review this screenplay YAML for quality issues and list specific fixes.
 
-Issues found:
-{issues_text if issues_text else 'No specific issues provided.'}
-
-Suggestions:
-{suggestions_text if suggestions_text else 'No specific suggestions provided.'}
+Issues to fix:
+{issues_text if issues_text else 'No specific issues.'}
 
 Current YAML:
-{yaml_content[:10000]}
+{yaml_content[:8000]}
 
-Original text reference:
-{original_text[:3000]}
+Output a JSON object with:
+1. "repaired_yaml": copy the CURRENT YAML exactly, fix ONLY the listed issues. Keep all existing content unchanged.
+2. "changes_made": array of strings summarizing each fix
 
-Output ONLY a JSON object with:
-- **repaired_yaml**: The full corrected YAML as a string
-- **changes_made**: Array of objects describing each change: {{field, before, after, reason}}
-- **validation_passed**: boolean indicating if the repair resolves all issues
+CRITICAL: Output ONLY the raw JSON object. Do NOT use markdown fences (no ```json```). The repaired_yaml field must be a single string — write each YAML line separated by the literal characters backslash-n (\\n). For example: "title: X\\ncharacters:\\n  - id: char_001"
 
-Preserve the YAML structure exactly. Only fix identified problems.
-Ensure all character IDs referenced exist in the character list.
-Ensure all scene_ids are unique across episodes.
-Ensure all transitions are valid (cut, fade, dissolve, wipe).
-Ensure all beat types are valid (dialogue, action, silence, reaction).
-
-No markdown, no explanation."""
+Example correct output:
+{{"repaired_yaml": "title: Test\\nlogline: A story\\ntheme: courage", "changes_made": ["added theme field"]}}"""
 
         prompt = self._build_rag_prompt(base_prompt, query)
 
