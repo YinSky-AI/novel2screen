@@ -48,8 +48,11 @@ class LLMClient:
         brace_match = re.search(r"\{.*\}", text, re.DOTALL)
         if brace_match:
             text = brace_match.group(0)
-        text = self._repair_json(text)
-        return json.loads(text)
+        try:
+            text = self._repair_json(text)
+            return json.loads(text)
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f"JSON parse failed after repair ({e}): {text[:200]}") from e
 
     def repair_json(self, text: str) -> str:
         return self._repair_json(text)

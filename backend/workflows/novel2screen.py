@@ -271,8 +271,13 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
             critic = self._critic.run({"yaml_content": yaml_content})
             issues = critic.get("issues", [])
             if issues:
-                repair = self._repair.run({"yaml_content": yaml_content, "issues": issues})
-                yaml_content = repair.get("repaired_yaml", yaml_content)
+                try:
+                    repair = self._repair.run({"yaml_content": yaml_content, "issues": issues})
+                    repaired = repair.get("repaired_yaml", "")
+                    if repaired and len(repaired) > 10:
+                        yaml_content = repaired
+                except Exception as e:
+                    logger.warning("RepairAgent failed (JSON parse error, using original YAML): %s", e)
 
             self._fidelity_check(novel_text, character_result)
 
