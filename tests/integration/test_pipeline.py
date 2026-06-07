@@ -65,7 +65,11 @@ def _mock_llm_chat(messages: list[dict[str, str]], *, model: str = "", temperatu
         return json.dumps({"locations": [{"name": "Home", "description": "A room", "significance": "Start", "visual_suggestions": "Warm light"}], "world_rules": [], "atmosphere": "Cozy"}, ensure_ascii=False)
 
     if "narrative structure" in full or "screenplay analyst" in full:
-        return json.dumps({"title": "Test", "logline": "A test story.", "genre": "Drama", "theme": "Testing", "core_conflict": "Hero vs Villain", "tone": "Dark", "target_audience": "All", "style_notes": "Cinematic"}, ensure_ascii=False)
+        return json.dumps({
+            "title": "Test", "logline": "A test story.", "genre": "Drama", "theme": "Testing",
+            "major_events": [{"chapter": 1, "event": "Start", "location": "Home", "time": "Morning", "characters_involved": ["Hero"], "emotion": "hope", "visual_focus": "Window", "sound_effect": "Wind"}],
+            "subplots": [],
+        }, ensure_ascii=False)
 
     if "Score each category" in full or "Quality assessment" in full:
         return json.dumps({"score": 8.0, "issues": [], "suggestions": [], "overall_assessment": "Good"}, ensure_ascii=False)
