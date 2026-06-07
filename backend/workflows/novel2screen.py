@@ -34,7 +34,6 @@ class Novel2ScreenWorkflow:
         self._consistency = ConsistencyAgent(llm_client, memory_manager)
 
     def _update_progress(self, task_id: str, pct: float, stage: str) -> None:
-        """Update progress in the backend's task store if task_id is provided."""
         if not task_id:
             return
         try:
@@ -44,6 +43,27 @@ class Novel2ScreenWorkflow:
                 _task_store[task_id]["current_stage"] = stage
         except Exception:
             pass
+
+    @staticmethod
+    def _stage_text(key: str, lang: str) -> str:
+        is_zh = lang in ("chinese", "mixed")
+        translations = {
+            "analyze_narrative": "分析叙事结构..." if is_zh else "Analyzing narrative structure...",
+            "extract_characters": "提取角色信息..." if is_zh else "Extracting characters...",
+            "write_scenes": "编写场景与对话..." if is_zh else "Writing scenes and dialogue...",
+            "assemble_screenplay": "组装剧本..." if is_zh else "Assembling screenplay...",
+            "generate_yaml": "生成 YAML 输出..." if is_zh else "Generating YAML output...",
+            "complete": "完成！" if is_zh else "Complete!",
+            "failed": "失败" if is_zh else "Failed",
+            "build_world": "构建世界观..." if is_zh else "Building world context...",
+            "organize_timeline": "整理时间线..." if is_zh else "Organizing timeline...",
+            "plan_episodes": "规划剧集..." if is_zh else "Planning episodes...",
+            "validate_skeleton": "校验剧集结构..." if is_zh else "Validating episode structure...",
+            "quality_review": "质量评审..." if is_zh else "Quality review...",
+            "writing_scenes_ep": lambda n, t: f"编写场景：第 {n}/{t} 集..." if is_zh else f"Writing scenes: episode {n}/{t}...",
+            "initializing": "启动管线..." if is_zh else "Starting pipeline...",
+        }
+        return translations.get(key, key) if not callable(translations.get(key)) else key
 
     def parse_and_segment(self, text: str) -> list[dict[str, str]]:
         from backend.core.preprocessor import parse_chapters
@@ -68,18 +88,18 @@ class Novel2ScreenWorkflow:
         lang = detect_language(novel_text)
 
         try:
-            self._update_progress(tid, 15, "Analyzing narrative structure...")
+            self._update_progress(tid, 15, self._stage_text("analyze_narrative", lang))
             narrative = self._narrative.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
 
-            self._update_progress(tid, 40, "Extracting characters...")
+            self._update_progress(tid, 40, self._stage_text("extract_characters", lang))
             character_result = self._character.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
             chars_raw = character_result.get("characters", []) if isinstance(character_result, dict) else []
 
-            self._update_progress(tid, 60, "Writing scenes and dialogue...")
+            self._update_progress(tid, 60, self._stage_text("write_scenes", lang))
             events = narrative.get("major_events", []) if isinstance(narrative, dict) else []
             ep_scenes = self._llm_write_scenes(novel_text, events, chars_raw, must_preserve)
 
-            self._update_progress(tid, 85, "Assembling screenplay...")
+            self._update_progress(tid, 85, self._stage_text("assemble_screenplay", lang))
             episodes = [{
                 "id": "ep_001",
                 "title": narrative.get("title", "Episode 1") if isinstance(narrative, dict) else "Episode 1",
@@ -93,7 +113,7 @@ class Novel2ScreenWorkflow:
                 "episodes": episodes,
             })
 
-            self._update_progress(tid, 95, "Generating YAML output...")
+            self._update_progress(tid, 95, self._stage_text("generate_yaml", lang))
             yaml_content = screenplay_to_yaml(screenplay, lang)
             self._fidelity_check(novel_text, character_result)
 
@@ -103,11 +123,11 @@ class Novel2ScreenWorkflow:
                         quality["emotion_null_rate"] * 100, quality["char_id_null_rate"] * 100,
                         quality["duration_diversity"], quality["issues"])
 
-            self._update_progress(tid, 100, "Complete!")
+            self._update_progress(tid, 100, self._stage_text("complete", lang))
             return {"task_id": tid, "yaml_content": yaml_content, "status": "completed", "quality": quality}
         except Exception:
             logger.exception("fast_run failed")
-            self._update_progress(tid, 100, "Failed")
+            self._update_progress(tid, 100, self._stage_text("failed", lang))
             return {"task_id": tid, "yaml_content": "", "status": "failed"}
 
     def _llm_write_scenes(self, novel_text: str, events: list, characters: list, must_preserve: str = "") -> list[dict]:
@@ -183,21 +203,21 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
             self._update_progress(tid, 8, "Analyzing narrative structure...")
             narrative = self._narrative.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
 
-            self._update_progress(tid, 18, "Extracting all characters...")
+            self._update_progress(tid, 18, self._stage_text("extract_characters", lang))
             character_result = self._character.retry({"novel_text": novel_text, "must_preserve": must_preserve, "language": lang})
             char_list = character_result.get("characters", []) if isinstance(character_result, dict) else []
 
-            self._update_progress(tid, 26, "Building world context...")
+            self._update_progress(tid, 26, self._stage_text("build_world", lang))
             world_result = self._world.run({"novel_text": novel_text})
 
-            self._update_progress(tid, 32, "Organizing timeline...")
+            self._update_progress(tid, 32, self._stage_text("organize_timeline", lang))
             _timeline = self._timeline.run({"novel_text": novel_text})
 
-            self._update_progress(tid, 40, "Planning episodes...")
+            self._update_progress(tid, 40, self._stage_text("plan_episodes", lang))
             ep_plan = self._episode_planner.run({"novel_text": novel_text, "characters": char_list})
             episodes_data = ep_plan.get("episodes", [])
 
-            self._update_progress(tid, 48, "Validating episode structure...")
+            self._update_progress(tid, 48, self._stage_text("validate_skeleton", lang))
             skeleton_yaml = yaml.dump(episodes_data[:3], allow_unicode=True) if episodes_data else ""
             if skeleton_yaml and must_preserve:
                 critic_result = self._critic.run({"yaml_content": skeleton_yaml, "fast": True, "must_preserve": must_preserve})
@@ -212,7 +232,7 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                 if not isinstance(ep, dict):
                     continue
                 pct = 50 + int(35 * (ep_idx + 1) / total_eps)
-                self._update_progress(tid, float(pct), f"Writing scenes: episode {ep_idx+1}/{total_eps}...")
+                self._update_progress(tid, float(pct), "编写场景：第 " + str(ep_idx+1) + "/" + str(total_eps) + " 集..." if lang in ("chinese","mixed") else "Writing scenes: episode " + str(ep_idx+1) + "/" + str(total_eps) + "...")
 
                 scenes_result = self._scene_planner.run({
                     "novel_text": novel_text,
@@ -238,7 +258,7 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                 ep["scenes"] = scenes_with_dialogue
                 assembled.append(ep)
 
-            self._update_progress(tid, 88, "Assembling screenplay...")
+            self._update_progress(tid, 88, self._stage_text("assemble_screenplay", lang))
             screenplay = self._build_screenplay({
                 "narrative": narrative,
                 "characters": character_result,
@@ -246,7 +266,7 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
                 "episodes": assembled,
             })
 
-            self._update_progress(tid, 94, "Quality review...")
+            self._update_progress(tid, 94, self._stage_text("quality_review", lang))
             yaml_content = screenplay_to_yaml(screenplay, lang)
             critic = self._critic.run({"yaml_content": yaml_content})
             issues = critic.get("issues", [])
@@ -259,11 +279,11 @@ Output ONLY valid JSON: {{"scenes": [...]}} No markdown, no explanation."""
             from backend.core.preprocessor import evaluate_yaml_quality
             quality = evaluate_yaml_quality(yaml_content)
 
-            self._update_progress(tid, 100, "Complete!")
+            self._update_progress(tid, 100, self._stage_text("complete", lang))
             return {"task_id": tid, "yaml_content": yaml_content, "status": "completed", "quality": quality}
         except Exception:
             logger.exception("run failed")
-            self._update_progress(tid, 100, "Failed")
+            self._update_progress(tid, 100, self._stage_text("failed", lang))
             return {"task_id": tid, "yaml_content": "", "status": "failed"}
 
     def _fidelity_check(self, novel_text: str, character_result: dict) -> None:
